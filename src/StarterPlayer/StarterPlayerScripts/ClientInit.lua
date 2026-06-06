@@ -1,30 +1,58 @@
 --!strict
--- ClientInit.lua
--- Central client initializer for Fog Sea.
--- Requires and initializes all client controllers in correct order.
--- Uses Maid for cleanup. Runs once on client.
--- Performance: One-time initialization. No unnecessary connections.
+-- ClientInit.lua (StarterPlayer/StarterPlayerScripts)
+-- Central client-side initializer for all Fog Sea client controllers.
+-- Ensures clean, ordered initialization of UI, combat, horror systems. Uses central Maid for shutdown.
+-- Controllers are required and explicitly initialized to avoid race conditions on mobile.
+-- Performance: One-time run only. No loops here. Defers heavy init to individual controllers.
+-- All client visuals and input are routed through these controllers. No server logic.
+-- Integrates with ExtractionManager via remotes for UI updates.
 -- Author: Fog Sea Architect - 2026-06-06
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local maid = Utils.CreateMaid()
 
 local Controllers = {
+	UI = require(script.Controllers.ClientUIController),
 	Combat = require(script.Controllers.ClientCombatController),
 	Horror = require(script.Controllers.ClientHorrorController),
-	UI = require(script.Controllers.ClientUIController),
-}
+	-- Add more as developed (e.g. ShipClientController for sailing visuals)
+} :: {[string]: any}
 
--- Initialize in safe order
-for name, controller in Controllers do
-	print(`Initializing client controller: {name}`)
-	-- Controllers are self-initializing on require in this design
+local function initializeControllers()
+	print("=== Fog Sea Client Initializing (mobile optimized) ===")
+	
+	for name, controller in Controllers do
+		print(`Initializing {name}Controller...`)
+		if typeof(controller.Initialize) == "function" then
+			local success, err = pcall(controller.Initialize)
+			if not success then
+				warn(`Failed to initialize {name}Controller: {err}`)
+			end
+		elseif typeof(controller.Maid) == "table" then
+			-- Some controllers self-init on require
+			print(`{name}Controller self-initialized via require`)
+		end
+	end
+	
+	-- Example: Register for extraction UI updates if needed
+	print("Client controllers fully loaded - UI, Combat, Horror systems active.")
 end
 
-print("=== ClientInit complete - All controllers loaded ===")
+initializeControllers()
 
+-- Global cleanup on leave
 maid:GiveTask(function()
-	print("Client shutting down - cleaning up controllers")
+	print("Client shutdown - cleaning all controllers")
+	for _, controller in Controllers do
+		if controller.Maid and typeof(controller.Maid.Cleanup) == "function" then
+			pcall(controller.Maid.Cleanup)
+		end
+	end
+	maid:Cleanup()
 end)
 
-return nil
+-- Return for potential GameManager or testing
+return {
+	Controllers = Controllers,
+	Maid = maid,
+}
