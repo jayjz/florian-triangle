@@ -1,0 +1,35 @@
+# Roblox Studio files
+*.rbxl
+*.rbxlx
+*.rbxmx
+*.rbxm
+
+# Build outputs
+build/
+bin/
+*.project.json
+
+# Logs and debug
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Temporary files
+*.tmp
+*.temp
+
+# Roblox-specific
+content/
+sourcemap.json
+
+# Ignore everything in src except our organized structure (if using plugin sync)
+# But we are using proper src/ structure so we commit it.
+
+# Hermès / AI files (if any)
+.hermes/cache/
