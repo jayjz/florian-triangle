@@ -15,7 +15,7 @@ local GhostShipGenerator = require(script.Parent.Parent.ReplicatedStorage.Module
 local EntityAI = require(script.Parent.Parent.ReplicatedStorage.Modules.EntityAI)
 local HorrorEvents = require(script.Parent.Parent.ReplicatedStorage.Modules.HorrorEvents)
 local ExtractionManager = require(script.Parent.Parent.ReplicatedStorage.Modules.ExtractionManager)
-local TestHarness = require(script.TestHarness) -- Phase 6 testing harness
+local TestHarness = require(script.Parent.TestHarness) -- Phase 6 testing harness
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
 
