@@ -4,12 +4,22 @@
 
 Sail a mobile ship through perpetual dense fog. Detect haunted ghost ships. Dock, scavenge cursed relics under rising supernatural pressure, extract valuable treasure, and escape alive with your crew.
 
-## Current Status (Phase 6 - Testing Harness & Asset Readiness)
-- Phase 5 (Extraction): B- review - basics landed but skeletal pooling, minimal anti-exploit, basic UI lerp. Push issues resolved via credential store.
-- Added TestHarness.lua for admin test spawns (ghost ship + 3 chests + 2 entities) for rapid Studio verification.
-- Asset placeholder notes added to ExtractionManager and GameManager for rigged models in ServerStorage.Assets.
-- Updated ROADMAP and this README with gaps and next steps (Rojo sync on main PC, multiplayer mobile testing).
-- All code follows non-negotiables: --!strict, types, Maid, Utils remotes, mobile perf comments, server authority, no client logic on server.
+## Current Status (Phase 7 - Asset Binding & Playtesting Prep)
+- Phase 6 B- review: Good NetworkOwnership and harness, but visuals and asset readiness skeletal.
+- Added ServerStorage/Assets structure notes and placeholder model references in GhostShipGenerator, ExtractionManager, EntityAI (rigged models to be bound for animations/sounds).
+- Expanded TestHarness with "fullTestScenario" command that spawns ship + chests + entities + applies difficulty.
+- Updated README with complete development workflow (Rojo sync steps, Studio testing on main PC, mobile emulator notes).
+- All files --!strict, Maid, Utils.CreateRemoteEvent, detailed mobile performance comments, full diffs.
+
+## Development Workflow
+1. **Rojo Sync on Main PC**: `cd /home/abundance333/Documents/florian-triangle && rojo serve` (syncs src/ to Roblox Studio place).
+2. **Studio Testing**: Open in Roblox Studio on main PC. Use TestHarness commands (/debug full or RemoteEvent "AdminDebugCommand" with "fullTestScenario").
+3. **Mobile Emulator**: Use Roblox Studio's mobile emulator (Device: iPhone 11, throttle CPU). Test extraction loop, AI pathfinding (3Hz), UI lerp on RenderStepped, replication with NetworkOwner(nil).
+4. **Asset Binding**: Place rigged models in ServerStorage.Assets (GhostShipRig, LootChestRig, CorruptedPirateRig). Update generators to :Clone() from there + CollectionService tags for client controllers.
+5. **GitHub**: Always verify with `git status + log + ls-remote`, full diffs, atomic commits, push. Credential helper store for PAT.
+6. **Playtesting Prep**: Multiplayer test (2-4 players, PC+mobile) for sanity/extraction synergy, fog culling, co-op ship sailing.
+
+See PROJECT-ROADMAP.md for phases and lua-best-practices.md for standards.
 
 ## Core Loop
 1. **Sail** — Navigate treacherous fog waters (mobile-first ship controls)
@@ -19,28 +29,13 @@ Sail a mobile ship through perpetual dense fog. Detect haunted ghost ships. Dock
 5. **Survive** — Escape before the ship (or your sanity) collapses
 
 ## Technical Philosophy
-- **Mobile First**: Every system designed and tested for low-end mobile performance (60 FPS target, 5Hz/3Hz loops, pooling, culling)
-- **Server Authority**: All critical game state, anti-exploit, validation, AI ownership (`SetNetworkOwner(nil)`) on server
-- **Modular & Clean**: ModuleScripts, Maid cleanup, strong typing, exported types, detailed comments
-- **GitHub First**: Atomic conventional commits, real diffs in history, no fluff
-
-## Setup
-```bash
-git clone https://github.com/jayjz/florian-triangle.git
-cd florian-triangle
-rojo serve
-```
-
-See `lua-best-practices.md` and `PROJECT-ROADMAP.md` for standards and current phase.
-
-## Next Steps
-- Rojo sync and full build on main development PC.
-- Multiplayer testing (PC + mobile) for replication, extraction loop, sanity drain, co-op ship sailing.
-- Import rigged assets to ServerStorage.Assets with CollectionService tags for visual controllers.
-- Expand TestHarness for full scenario replay and performance profiling.
+- **Mobile First**: 60 FPS target, 5Hz/3Hz loops, pooling, culling, NetworkOwner(nil) on AI.
+- **Server Authority**: All state, validation, damage, penalties on server. Remotes for client visuals only.
+- **Modular**: Maid cleanup, strong typing, exported types, Utils for remotes/services.
+- **GitHub First**: Clean history, real diffs, honest reviews.
 
 **"Even in the Florian Triangle... a crew that sticks together can make it through anything."**
 
 ---
-**Current Phase**: 6 - Testing & Assets  
-**Architect**: Fog Sea Architect (Luau Shipwright) - 2026-06-07
+**Current Phase**: 7 - Asset Binding & Playtesting Prep (B- visuals readiness)
+**Architect**: Fog Sea Architect - 2026-06-07
