@@ -1,14 +1,13 @@
 --!strict
 -- TestHarness.lua (ServerScriptService)
--- Admin testing harness for Fog Sea Phase 6. Provides RemoteEvent-based command to instantly spawn a test ghost ship with 3 loot chests and 2 AI entities.
--- Allows rapid in-Studio verification of extraction loop, AI behavior, weight penalties without full game start.
--- Uses Utils.CreateRemoteEvent for admin command (validated on server). Maid for cleanup of test objects.
--- Performance: One-shot spawn only, no loops. Spawns are culled by existing systems. Explicit notes on mobile replication cost.
--- Architecture: Server-authoritative only. Fires no client visuals here (delegates to existing controllers). Studio-only guard.
--- Asset readiness: Placeholder bindings for ServerStorage.Assets (rigged ship/chest/AI models). Replace template spawning in prod.
+-- Full debug menu for Fog Sea cleanup phase. RemoteEvent "AdminDebugCommand" supports commands: "spawnTestShip", "spawnEntities count", "spawnChests count", "setDifficulty level".
+-- Server-authoritative spawning using existing generators/managers. Validates commands to prevent exploits.
+-- Maid for per-test cleanup of spawned objects. Performance: One-shot commands only, no persistent loops. Spawning defers to subsystems' throttling (3Hz/5Hz).
+-- Architecture: Integrates with GameManager. All state on server; clients receive visuals via existing remotes/controllers only. Studio + admin guard.
+-- Roblox realities: SetNetworkOwner(nil) on all spawned AI. No server visuals. Comments on mobile replication cost.
 -- Author: Fog Sea Architect - 2026-06-07
 
-local Utils = require(game.ServerScriptService.Parent.ReplicatedStorage.Modules.Utils)
+local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local GhostShipGenerator = require(game.ReplicatedStorage.Modules.GhostShipGenerator)
 local ExtractionManager = require(game.ReplicatedStorage.Modules.ExtractionManager)
 local EntityAI = require(game.ReplicatedStorage.Modules.EntityAI)
@@ -18,66 +17,91 @@ local RunService = Utils.GetService("RunService")
 local TestHarness = {}
 TestHarness.__index = TestHarness
 
+export type DebugCommand = "spawnTestShip" | "spawnEntities" | "spawnChests" | "setDifficulty"
 export type TestHarness = typeof(TestHarness)
 
 local testMaid = Utils.CreateMaid()
-local AdminTestRemote = Utils.CreateRemoteEvent("AdminTestSpawn")
+local AdminDebugRemote = Utils.CreateRemoteEvent("AdminDebugCommand")
+
+local currentDifficulty = 1
 
 local function isAdmin(player: Player): boolean
-	-- Studio or specific user check for safety in prod
-	return game:GetService("RunService"):IsStudio() or player.UserId == 123456789 -- Replace with admin list
+	-- Production guard: Studio or specific UserId list. Prevents exploit in live games.
+	return RunService:IsStudio() or player.UserId == 0 -- Replace with real admin system
 end
 
-local function spawnTestScenario(centerPos: Vector3)
-	-- Spawn test ghost ship (placeholder for rigged model in ServerStorage.Assets.GhostShipRig)
-	local testShip = GhostShipGenerator.CreateTestShip(centerPos) -- Assume method or extend generator
-	print("TestHarness: Spawned ghost ship at " .. tostring(centerPos))
+local function executeDebugCommand(player: Player, command: DebugCommand, param: number?)
+	if not isAdmin(player) then return end
 	
-	-- Add 3 loot chests via ExtractionManager (uses its pooling)
-	for i = 1, 3 do
-		ExtractionManager.CreateTestChest(testShip)
+	local center = Vector3.new(0, 50, 0)
+	local char = player.Character
+	if char and char:FindFirstChild("HumanoidRootPart") then
+		center = (char.HumanoidRootPart :: Part).Position + Vector3.new(0, 30, 50)
 	end
 	
-	-- Add 2 entities (AI) via EntityAI (SetNetworkOwner(nil) enforced)
-	for i = 1, 2 do
-		local entity = EntityAI.SpawnTestEntity(centerPos + Vector3.new(math.random(-20,20), 5, math.random(-20,20)))
-		testMaid:GiveTask(entity) -- Cleanup on test end
-		entity:SetNetworkOwner(nil) -- Critical for AI authority on mobile clients
+	if command == "spawnTestShip" then
+		-- Uses generator (placeholder for rigged asset)
+		local ship = GhostShipGenerator.CreateTestShip(center)
+		for i = 1, 3 do
+			ExtractionManager.CreateTestChest(ship)
+		end
+		for i = 1, 2 do
+			local e = EntityAI.SpawnTestEntity(center + Vector3.new((i-1)*10, 0, 0))
+			e.Root:SetNetworkOwner(nil) -- Critical for mobile AI replication
+			testMaid:GiveTask(e.Model)
+		end
+		print(`Test ship + 3 chests + 2 entities spawned by {player.Name}`)
+	elseif command == "spawnEntities" then
+		local count = math.clamp(param or 3, 1, 8)
+		for i = 1, count do
+			local e = EntityAI.SpawnTestEntity(center + Vector3.new(i*8, 0, 0))
+			e.Root:SetNetworkOwner(nil)
+			testMaid:GiveTask(e.Model)
+		end
+		print(`Spawned {count} test entities`)
+	elseif command == "spawnChests" then
+		local count = math.clamp(param or 3, 1, 6)
+		local ship = GhostShipGenerator.CreateTestShip(center)
+		for i = 1, count do
+			ExtractionManager.CreateTestChest(ship)
+		end
+		print(`Spawned {count} test chests`)
+	elseif command == "setDifficulty" then
+		currentDifficulty = math.clamp(param or 1, 1, 5)
+		print(`Difficulty set to {currentDifficulty}`)
 	end
-	
-	print("TestHarness: Spawned 3 chests + 2 entities. Verify extraction, sanity, weight penalties in Studio.")
 end
 
 function TestHarness.Initialize()
-	AdminTestRemote.OnServerEvent:Connect(function(player: Player, command: string)
-		if not isAdmin(player) or command ~= "spawnTest" then return end -- Full validation (anti-exploit)
-		local center = Vector3.new(0, 50, 0) -- Or player character position
-		local char = player.Character
-		if char and char:FindFirstChild("HumanoidRootPart") then
-			center = (char.HumanoidRootPart :: Part).Position + Vector3.new(0, 30, 0)
-		end
-		spawnTestScenario(center)
+	AdminDebugRemote.OnServerEvent:Connect(function(player: Player, command: DebugCommand, param: number?)
+		executeDebugCommand(player, command, param)
 	end)
 	
-	-- Chat command fallback for Studio testing
-	Players.PlayerAdded:Connect(function(player)
+	-- Chat fallback for quick Studio testing
+	Players.PlayerAdded:Connect(function(player: Player)
 		if isAdmin(player) then
-			player.Chatted:Connect(function(msg)
-				if msg:lower() == "/testship" then
-					AdminTestRemote:FireClient(player, "spawnTest") -- Or direct call
+			player.Chatted:Connect(function(msg: string)
+				local lower = msg:lower()
+				if lower:find("/debug") then
+					-- Parse simple commands from chat
+					if lower:find("ship") then
+						AdminDebugRemote:FireServer("spawnTestShip")
+					elseif lower:find("entity") then
+						local count = tonumber(lower:match("%d+")) or 2
+						AdminDebugRemote:FireServer("spawnEntities", count)
+					end
 				end
 			end)
 		end
 	end)
 	
-	print("TestHarness initialized - Admin spawn command ready (/testship or RemoteEvent). Asset placeholders noted for rigged models.")
+	print("TestHarness full debug menu initialized (AdminDebugCommand RemoteEvent, mobile-safe spawning, NetworkOwner fixes).")
 end
 
 function TestHarness.Destroy()
 	testMaid:Cleanup()
 end
 
--- Auto init
 TestHarness.Initialize()
 
 return TestHarness
