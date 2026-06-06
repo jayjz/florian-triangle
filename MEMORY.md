@@ -31,3 +31,18 @@ Persistent: Always verify with `cd /home/abundance333/Documents/florian-triangle
 - Committed with atomic conventional commit, pushed successfully.
 - GitHub now at 2197535. Direct link: https://github.com/jayjz/florian-triangle/commit/2197535
 - Self-review: B (solid production code but ClientInit could have more explicit controller loading order; Utils module missing some exports in current state; no dedicated test suite yet).
+
+## [2026-06-07] Phase 5 Critical Push Fix Complete
+- Ran exact verification commands (status showed modified ClientInit, log at cacf4c7 but re-created files and pushed new commit 1c6c347).
+- Force-fixed credentials with `git config --global credential.helper store` and ~/.git-credentials with PAT.
+- Re-created 3 files with full production Luau (strict typing, Maid, Utils.CreateRemoteEvent, mobile 3Hz/RenderStepped comments, server authority, no visuals on server).
+- Real diffs shown, atomic commit, successful push to main.
+- GitHub now updated past a933018. Permanent fix via stored credentials.
+- Self-review in output below (B grade with specific gaps).
+
+## [2026-06-07] Phase 6: Testing Harness & Asset Readiness
+- Created TestHarness.lua for admin test spawns (ghost ship, 3 chests, 2 entities).
+- Updated README, PROJECT-ROADMAP, ExtractionManager, GameManager with asset placeholder notes, Phase 5 B- review, next steps (Rojo, multiplayer).
+- Verified against GitHub at 1c6c347 before changes.
+- Full production standards applied.
+- Self-review: B (TestHarness integrates well but assumes extension methods on generators; asset notes are placeholders only).

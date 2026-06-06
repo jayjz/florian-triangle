@@ -1,12 +1,13 @@
 --!strict
 -- GameManager.lua
 -- Central server orchestrator for Fog Sea (Florian Triangle).
--- Ties together ShipController, GhostShipGenerator, EntityAI, HorrorEvents, ExtractionManager.
+-- Ties together ShipController, GhostShipGenerator, EntityAI, HorrorEvents, ExtractionManager, TestHarness.
 -- Handles player loading, main game loop at 5Hz, entity spawning, extraction loop coordination.
 -- All critical state server-authoritative. Uses RemoteEvents ONLY for client visuals/UI sync.
 -- Performance: 5Hz main loop, culling, pooling. Explicit SetNetworkOwner(nil) on all AI (from Phase 4).
 -- This is the single source of truth for game state.
--- Author: Fog Sea Architect - 2026-06-06
+-- Asset readiness notes (Phase 6): TODO - Bind ServerStorage.Assets.GhostShipRig, AI rigs, chest models with animations. Use tags for client-side visual controllers. Update spawning in subsystems to use rigged versions.
+-- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(script.Parent.Parent.ReplicatedStorage.Modules.Utils)
 local ShipController = require(script.Parent.Parent.ReplicatedStorage.Modules.ShipController)
@@ -14,6 +15,7 @@ local GhostShipGenerator = require(script.Parent.Parent.ReplicatedStorage.Module
 local EntityAI = require(script.Parent.Parent.ReplicatedStorage.Modules.EntityAI)
 local HorrorEvents = require(script.Parent.Parent.ReplicatedStorage.Modules.HorrorEvents)
 local ExtractionManager = require(script.Parent.Parent.ReplicatedStorage.Modules.ExtractionManager)
+local TestHarness = require(script.TestHarness) -- Phase 6 testing harness
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
 
@@ -45,7 +47,8 @@ function GameManager.Initialize()
 	GhostShipGenerator.Initialize()
 	EntityAI.Initialize()
 	HorrorEvents.Initialize()
-	ExtractionManager.Initialize()  -- New: Loot + weight system integrated into core loop
+	ExtractionManager.Initialize()  -- Loot + weight system integrated into core loop
+	TestHarness.Initialize() -- Phase 6: Testing harness for rapid verification
 	
 	-- Player management
 	Players.PlayerAdded:Connect(onPlayerAdded)
@@ -78,7 +81,7 @@ function GameManager.Initialize()
 		-- Full implementation would query ExtractionManager.GetPlayerWeight()
 	end))
 	
-	print("=== GameManager fully initialized with Extraction Loop (Phase 5 complete) ===")
+	print("=== GameManager fully initialized with Extraction Loop + TestHarness (Phase 6) ===")
 end
 
 function GameManager.Destroy()
@@ -87,6 +90,7 @@ function GameManager.Destroy()
 	HorrorEvents.Destroy()
 	GhostShipGenerator.Destroy()
 	ExtractionManager.Destroy()
+	TestHarness.Destroy()
 end
 
 -- Auto start

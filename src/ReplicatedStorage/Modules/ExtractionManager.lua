@@ -6,6 +6,7 @@
 -- Performance: Heartbeat throttled to ~3Hz for spawning checks (mobile server safety). Object pooling for chests. Minimal state.
 -- Maid pattern for all cleanup. Integrates with GhostShipGenerator. Explicit SetNetworkOwner(nil) note for dynamic parts.
 -- Uses Utils.CreateRemoteEvent. No server visuals or physics simulation.
+-- Asset readiness notes (Phase 6): TODO: Replace createChestModel() with ServerStorage.Assets.LootChestRig:Clone(). Bind rigged models with animations/sounds. Use CollectionService tags for client visual controllers. Ensure all spawned Models have PrimaryPart and NetworkOwner set to nil for AI/ship parts on mobile replication.
 -- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(script.Parent.Utils)
@@ -178,6 +179,11 @@ function ExtractionManager.Destroy()
 	table.clear(activeChests)
 	table.clear(playerWeight)
 	table.clear(chestPool)
+end
+
+function ExtractionManager.CreateTestChest(ship: any)
+	-- Test helper for TestHarness
+	return createLootChest(ship)
 end
 
 return ExtractionManager
