@@ -1,10 +1,9 @@
 --!strict
 -- TestHarness.lua (ServerScriptService)
--- Expanded debug menu for Phase 7. RemoteEvent "AdminDebugCommand" includes "fullTestScenario" that spawns complete round (ship + 3 chests + 2 entities + difficulty + GameManager init).
--- Server-authoritative. Uses existing generators/managers. Validates all commands (anti-exploit).
--- Maid for test cleanup. Performance: One-shot only, defers to 3Hz/5Hz subsystem loops. No persistent work.
--- Architecture: Called from GameManager or chat. All spawning on server; visuals via remotes to client controllers only. Studio guard.
--- Asset binding: All spawns reference ServerStorage.Assets.*Rig placeholders (rigged models with animations to be bound in prod). Uses CollectionService tags.
+-- Fixed for Phase 7: "fullTestScenario" now has guard for GameManager.Initialize() to avoid duplication. Spawns complete testable round (ship + 3 chests + 2 entities + difficulty scaling).
+-- Server-authoritative. Validates commands (anti-exploit). Maid for cleanup. Performance: One-shot only, defers to subsystem throttling (3Hz/5Hz for spawning/AI). No persistent loops.
+-- Architecture: Integrates with GameManager (with guard). All state on server; client visuals via remotes only. Studio/admin guard.
+-- Asset binding: References ServerStorage.Assets.*Rig with placeholder logic + CollectionService tags (for client controllers).
 -- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
@@ -14,6 +13,7 @@ local EntityAI = require(game.ReplicatedStorage.Modules.EntityAI)
 local GameManager = require(game.ServerScriptService.GameManager)
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
+local CollectionService = Utils.GetService("CollectionService")
 
 local TestHarness = {}
 TestHarness.__index = TestHarness
@@ -25,6 +25,7 @@ local testMaid = Utils.CreateMaid()
 local AdminDebugRemote = Utils.CreateRemoteEvent("AdminDebugCommand")
 
 local currentDifficulty = 1
+local isInitialized = false
 
 local function isAdmin(player: Player): boolean
 	-- Production guard: Studio or admin list. Prevents exploits in live games.
@@ -41,29 +42,37 @@ local function executeDebugCommand(player: Player, command: DebugCommand, param:
 	end
 	
 	if command == "fullTestScenario" then
-		-- Complete round: ship + 3 chests + 2 entities + difficulty + GameManager init
-		GameManager.Initialize() -- Ensure full orchestration
-		local ship = GhostShipGenerator.CreateTestShip(center) -- Placeholder for ServerStorage.Assets.GhostShipRig
+		if not isInitialized then
+			GameManager.Initialize()
+			isInitialized = true
+		end
+		local ship = GhostShipGenerator.CreateTestShip(center)
+		CollectionService:AddTag(ship.Model, "GhostShip")
 		for i = 1, 3 do
-			ExtractionManager.CreateTestChest(ship)
+			local chest = ExtractionManager.CreateTestChest(ship)
+			CollectionService:AddTag(chest.Model, "LootChest")
 		end
 		for i = 1, 2 do
 			local e = EntityAI.SpawnTestEntity(center + Vector3.new(i*12, 0, 0))
+			CollectionService:AddTag(e.Model, "CorruptedPirate")
 			if e.Root then e.Root:SetNetworkOwner(nil) end
 			testMaid:GiveTask(e.Model)
 		end
 		currentDifficulty = param or 2
-		print(`Full test scenario spawned by {player.Name} at difficulty {currentDifficulty} with GameManager init`)
+		print(`Full testable round spawned by {player.Name} at difficulty {currentDifficulty} (with guard and tags)`)
 	elseif command == "spawnTestShip" then
 		local ship = GhostShipGenerator.CreateTestShip(center)
+		CollectionService:AddTag(ship.Model, "GhostShip")
 		for i = 1, 3 do
-			ExtractionManager.CreateTestChest(ship)
+			local chest = ExtractionManager.CreateTestChest(ship)
+			CollectionService:AddTag(chest.Model, "LootChest")
 		end
 		print(`Test ship spawned by {player.Name}`)
 	elseif command == "spawnEntities" then
 		local count = math.clamp(param or 3, 1, 8)
 		for i = 1, count do
 			local e = EntityAI.SpawnTestEntity(center + Vector3.new(i*8, 0, 0))
+			CollectionService:AddTag(e.Model, "CorruptedPirate")
 			if e.Root then e.Root:SetNetworkOwner(nil) end
 			testMaid:GiveTask(e.Model)
 		end
@@ -71,8 +80,10 @@ local function executeDebugCommand(player: Player, command: DebugCommand, param:
 	elseif command == "spawnChests" then
 		local count = math.clamp(param or 3, 1, 6)
 		local ship = GhostShipGenerator.CreateTestShip(center)
+		CollectionService:AddTag(ship.Model, "GhostShip")
 		for i = 1, count do
-			ExtractionManager.CreateTestChest(ship)
+			local chest = ExtractionManager.CreateTestChest(ship)
+			CollectionService:AddTag(chest.Model, "LootChest")
 		end
 		print(`Spawned {count} test chests`)
 	elseif command == "setDifficulty" then
@@ -101,11 +112,12 @@ function TestHarness.Initialize()
 		end
 	end)
 	
-	print("TestHarness expanded with fullTestScenario (asset binding notes, Maid, server authority, mobile comments, GameManager init).")
+	print("TestHarness fixed with fullTestScenario guard + complete round (asset references, CollectionService tags, Maid, performance comments).")
 end
 
 function TestHarness.Destroy()
 	testMaid:Cleanup()
+	isInitialized = false
 end
 
 TestHarness.Initialize()

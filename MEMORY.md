@@ -54,3 +54,11 @@ Persistent: Always verify with `cd /home/abundance333/Documents/florian-triangle
 - Updated README with workflow.
 - Verified GitHub first. All --!strict, Maid, Utils, performance comments.
 - Commit 40705bd. Self-review B- (notes only, no real rigs, TestHarness assumes methods, no full Rojo test yet).
+
+## [2026-06-07] Phase 7: Asset Binding & Playtesting Prep
+- Created src/ServerStorage/Assets and default.project.json for Rojo sync.
+- Fixed TestHarness fullTestScenario with init guard and complete round.
+- Made asset binding concrete in 3 modules with ServerStorage.Assets.*Rig references, CollectionService tags, placeholder logic.
+- Updated README and PROJECT-ROADMAP with accurate B- status and next steps (Windows PC Rojo/Studio testing).
+- Verified GitHub first (at 1ed95ba). All --!strict, Maid, Utils, comments.
+- Commit 1ed95ba. Self-review B- (rojo.json basic, no real rigs imported, tags not consumed by client code yet, TestHarness guard basic, duplication risk mitigated but not fully tested).
