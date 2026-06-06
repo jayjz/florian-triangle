@@ -131,15 +131,4 @@ end
 
 TestHarness.Initialize()
 
--- Expose to _G for bulletproof Studio Command Bar testing (Bypasses Roblox Chat UI entirely)
-_G.ForceTestScenario = function(playerId: number?)
-    local target = playerId and Players:GetPlayerByUserId(playerId) or Players:GetPlayers()[1]
-    if target then
-        print(`[TestHarness] Forcing fullTestScenario for {target.Name} via Command Bar...`)
-        executeDebugCommand(target, "fullTestScenario", 3)
-    else
-        warn("[TestHarness] No players found to execute the test scenario.")
-    end
-end
-
 return TestHarness
