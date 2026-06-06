@@ -25,7 +25,7 @@ local testMaid = Utils.CreateMaid()
 local AdminDebugRemote = Utils.CreateRemoteEvent("AdminDebugCommand")
 
 local currentDifficulty = 1
-local isInitialized = false
+local isGameManagerInitialized = false
 
 local function isAdmin(player: Player): boolean
 	-- Production guard: Studio or admin list. Prevents exploits in live games.
@@ -42,9 +42,9 @@ local function executeDebugCommand(player: Player, command: DebugCommand, param:
 	end
 	
 	if command == "fullTestScenario" then
-		if not isInitialized then
+		if not isGameManagerInitialized then
 			GameManager.Initialize()
-			isInitialized = true
+			isGameManagerInitialized = true
 		end
 		local ship = GhostShipGenerator.CreateTestShip(center)
 		CollectionService:AddTag(ship.Model, "GhostShip")
@@ -117,7 +117,7 @@ end
 
 function TestHarness.Destroy()
 	testMaid:Cleanup()
-	isInitialized = false
+	isGameManagerInitialized = false
 end
 
 TestHarness.Initialize()

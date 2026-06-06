@@ -1,22 +1,25 @@
 # Fog Sea (Florian Triangle) Project Roadmap
 
-## Phase 7: Asset Binding & Playtesting Prep (Completed - Commit 1ed95ba)
-- Created src/ServerStorage/Assets folder and default.project.json for clean Rojo sync (includes ServerStorage/Assets).
-- Fixed TestHarness "fullTestScenario" with initialization guard and complete testable round (ship + 3 chests + 2 entities + difficulty).
-- Made asset binding concrete in GhostShipGenerator, ExtractionManager, EntityAI with ServerStorage.Assets.*Rig references (placeholder logic) and CollectionService tags ("GhostShip", "LootChest", "CorruptedPirate").
-- Updated README.md and this file with accurate B- status, next steps (Rojo sync on Windows PC + Studio testing with TestHarness).
-- All files --!strict, Maid, Utils, performance comments, full diffs.
-- Self-review B- (see below). Last updated 2026-06-07.
+## Phase 7: Asset Binding & Playtesting Prep + Structural Fixes (Completed - 2026-06-08)
+- Fixed Rojo structure: default.project.json now has explicit "$className": "DataModel" at root + complete tree for ServerStorage/Assets.
+- Created/verified src/ServerStorage/Assets folder.
+- Patched TestHarness.lua with isGameManagerInitialized boolean guard preventing duplicate Initialize() calls.
+- Created ClientShipController.lua and updated ClientUIController.lua to consume CollectionService tags ("GhostShip", "LootChest") via GetInstanceAddedSignal with client-side Highlight for visual confirmation in Studio.
+- Updated MEMORY.md and this ROADMAP with today's date and details.
+- Git verification, atomic commit "fix(core): establish Rojo DataModel, patch TestHarness guard, add client tag consumers", successful push.
+- Self-review: B (addresses all 4 critical gaps listed; client tag consumers now exist but not yet wired into ClientInit.lua; highlights are dev aids only and should be conditional on RunService:IsStudio(); no real 3D assets yet; needs immediate Windows Rojo playtest to validate sync).
+- Last updated: 2026-06-08
 
 ## Previous Phases
-- Phase 6: Testing Harness (B- visuals/asset readiness).
-- Phase 5: Extraction (B- skeletal pooling/anti-exploit).
-- Earlier: Core, AI, client controllers.
+- Phase 7 initial: B- due to missing client consumers, incorrect project.json, folder issues, init guard.
+- Phase 6: Testing Harness (B-).
+- Phase 5: Extraction (B-).
 
 **Next Steps:**
-- Rojo sync on Windows PC: copy default.project.json, `rojo serve`.
-- Studio testing: Use TestHarness commands for full round, verify tags in client controllers, mobile emulator for performance.
-- Import real rigged models to ServerStorage.Assets and update placeholder logic.
-- Full multiplayer playtest for extraction/sanity synergy.
+- On Windows PC: rojo serve, open in Studio, run fullTestScenario via chat/debug, verify client highlights on spawned assets.
+- Wire ClientShipController.Initialize() and updated controllers in ClientInit.lua.
+- Import real rigged models into ServerStorage.Assets (use placeholders for now).
+- Add distance-based culling / pooling for client highlights if many entities.
+- Full co-op horror extraction playtest.
 
-(See MEMORY.md for timestamps and gaps.)
+(See MEMORY.md for full history and brutally honest gaps.)

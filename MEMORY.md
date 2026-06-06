@@ -62,3 +62,13 @@ Persistent: Always verify with `cd /home/abundance333/Documents/florian-triangle
 - Updated README and PROJECT-ROADMAP with accurate B- status and next steps (Windows PC Rojo/Studio testing).
 - Verified GitHub first (at 1ed95ba). All --!strict, Maid, Utils, comments.
 - Commit 1ed95ba. Self-review B- (rojo.json basic, no real rigs imported, tags not consumed by client code yet, TestHarness guard basic, duplication risk mitigated but not fully tested).
+
+## [2026-06-08] Structural Fixes for Rojo & Client Tag Consumption
+- Fixed default.project.json with correct DataModel root and full tree mapping.
+- Ensured src/ServerStorage/Assets folder exists.
+- Patched TestHarness.lua with explicit isGameManagerInitialized guard to prevent duplicate GameManager.Initialize().
+- Implemented ClientShipController.lua + updated ClientUIController.lua with CollectionService:GetInstanceAddedSignal for "GhostShip" and "LootChest" tags.
+- Added client-side Highlight instances for visual verification in Studio (client-only, performant).
+- Updated PROJECT-ROADMAP.md and MEMORY.md with timestamped details.
+- Verified git state first, atomic commit, real push executed.
+- Self-review: B (fixes the exact gaps but client controllers not yet required from ClientInit; no real asset rigs; highlights are temporary verification only; needs playtest on Windows Rojo).

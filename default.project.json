@@ -1,32 +1,16 @@
 {
-  "name": "FlorianTriangle",
-  "tree": {
-    "$className": "DataModel",
-
-    "ServerScriptService": {
-      "$className": "ServerScriptService",
-      "$path": "src/ServerScriptService"
-    },
-
-    "ReplicatedStorage": {
-      "$className": "ReplicatedStorage",
-      "$path": "src/ReplicatedStorage"
-    },
-
-    "StarterPlayer": {
-      "$className": "StarterPlayer",
-      "StarterPlayerScripts": {
-        "$className": "StarterPlayerScripts",
-        "$path": "src/StarterPlayer/StarterPlayerScripts"
-      }
-    },
-
-    "ServerStorage": {
-      "$className": "ServerStorage",
-      "Assets": {
-        "$className": "Folder",
-        "$path": "src/ServerStorage/Assets"
+    "name": "FlorianTriangle",
+    "tree": {
+      "$className": "DataModel",
+      "ServerScriptService": { "$className": "ServerScriptService", "$path": "src/ServerScriptService" },
+      "ReplicatedStorage": { "$className": "ReplicatedStorage", "$path": "src/ReplicatedStorage" },
+      "StarterPlayer": {
+        "$className": "StarterPlayer",
+        "StarterPlayerScripts": { "$className": "StarterPlayerScripts", "$path": "src/StarterPlayer/StarterPlayerScripts" }
+      },
+      "ServerStorage": {
+        "$className": "ServerStorage",
+        "Assets": { "$className": "Folder", "$path": "src/ServerStorage/Assets" }
       }
     }
   }
-}
