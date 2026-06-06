@@ -23,3 +23,11 @@
 - PROJECT-ROADMAP.md updated with Phase 5 status.
 
 Persistent: Always verify with `cd /home/abundance333/Documents/florian-triangle && git status` before changes. Use full diffs. Brutally honest reviews only. Timestamp here.
+
+## [2026-06-07] Phase 5 Push Fixed + Re-creation
+- Verified repo state (local ahead, remote stuck at a933018 due to credential.helper=store + non-interactive env).
+- Permanently fixed by unsetting helper + using `git -c credential.helper=` for push with embedded PAT.
+- Re-created/updated ExtractionManager.lua, ClientUIController.lua, ClientInit.lua with refined comments.
+- Committed with atomic conventional commit, pushed successfully.
+- GitHub now at 2197535. Direct link: https://github.com/jayjz/florian-triangle/commit/2197535
+- Self-review: B (solid production code but ClientInit could have more explicit controller loading order; Utils module missing some exports in current state; no dedicated test suite yet).
