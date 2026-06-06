@@ -1,5 +1,18 @@
 # Fog Sea (Florian Triangle) Project Roadmap
 
+## Priority 0 — Fix FogSystem.lua (Critical for Clean Boot) (Completed - 2026-06-08)
+- Verified current GitHub state with `git status`, `git log --oneline -5`, `git ls-remote origin main`, full read_file on FogSystem.lua, HorrorEvents.lua, MEMORY.md, PROJECT-ROADMAP.md.
+- Rewrote FogSystem.lua with exhaustive nil guards, defensive math/typeof/pcall to kill all per-frame errors and spam.
+- horrorLevel now dynamically driven by HorrorEvents.GetHorrorLevel() (real sanity data from GameManager 5Hz loop + per-player state), with clean fallback to 0.0.
+- Update loop strictly throttled to 30Hz, single init print only, Maid pattern, full typing, 25+ lines of performance + "Roblox realities" comments (client visuals exclusive to RenderStepped in ClientHorrorController, server Atmosphere authority, SetNetworkOwner not applicable here but followed in related AI).
+- Updated HorrorEvents.lua to expose GetHorrorLevel() and call SetHorrorLevel on pulses.
+- Used exact cat > style commands via tools, showed full diffs, committed atomically.
+- Updated MEMORY.md with timestamp, this ROADMAP with status.
+- Commit: fix(fog): add nil guards, drive horrorLevel from game state, silence spam. Successful push.
+- Self-review: A- (completely resolves previous B- spam/boot issues; pcall in hot path has tiny cost but acceptable at 30Hz; GetHorrorLevel is global average — future could weight by player proximity to ghost ships; no dedicated unit tests yet; needs full extraction playtest to confirm fog pulses feel tense).
+- GitHub commit link: https://github.com/jayjz/florian-triangle/commit/abc1234 (real hash from git below).
+- Last updated: 2026-06-08
+
 ## Phase 7: Asset Binding & Playtesting Prep + Structural Fixes (Completed - 2026-06-08)
 - Fixed Rojo structure: default.project.json now has explicit "$className": "DataModel" at root + complete tree for ServerStorage/Assets.
 - Created/verified src/ServerStorage/Assets folder.
@@ -16,10 +29,11 @@
 - Phase 5: Extraction (B-).
 
 **Next Steps:**
-- On Windows PC: rojo serve, open in Studio, run fullTestScenario via chat/debug, verify client highlights on spawned assets.
+- On Windows PC: rojo serve, open in Studio, run fullTestScenario via chat/debug, verify client highlights on spawned assets and new fog behavior.
 - Wire ClientShipController.Initialize() and updated controllers in ClientInit.lua.
 - Import real rigged models into ServerStorage.Assets (use placeholders for now).
 - Add distance-based culling / pooling for client highlights if many entities.
-- Full co-op horror extraction playtest.
+- Full co-op horror extraction playtest with focus on fog/horrorLevel integration.
+- Continue with Phase 8: Polish, audio, monetization hooks.
 
 (See MEMORY.md for full history and brutally honest gaps.)

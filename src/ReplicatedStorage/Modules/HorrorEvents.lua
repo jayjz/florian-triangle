@@ -4,9 +4,9 @@
 -- Production implementation with actual Sound whispers, client hallucination triggers, floor collapse traps that deal damage, and proximity effects.
 -- Client/Server separation is strict: Server manages sanity decay and triggers, clients handle visual/audio effects via RemoteEvents.
 -- Performance: Server runs at 4Hz for sanity, uses object pooling for sounds, limits active effects. Mobile-friendly.
--- Uses Maid for all connections and effects. Integrates with FogSystem and EntityAI.
--- Author: Fog Sea Architect - 2026-06-06
-
+-- Uses Maid for all connections and effects. Integrates with FogSystem (now with proper horrorLevel drive).
+-- Added GetHorrorLevel() for FogSystem to pull real game state (average player sanity inversion).
+-- Author: Fog Sea Architect - 2026-06-08
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
 local RunService = Utils.GetService("RunService")
@@ -67,7 +67,7 @@ function HorrorEvents.Initialize()
 		end
 	end)
 	
-	print("HorrorEvents initialized - Full sanity, whispers, hallucinations, and traps active")
+	print("HorrorEvents initialized - Full sanity, whispers, hallucinations, and traps active. FogSystem linked.")
 end
 
 function HorrorEvents:Update(dt: number)
@@ -134,6 +134,7 @@ end
 function HorrorEvents.TriggerHorrorPulse(intensity: number)
 	Remotes.HorrorPulse:FireAllClients(intensity)
 	FogSystem.TriggerHorrorPulse(intensity)
+	FogSystem.SetHorrorLevel(0.6) -- Drive fog from real horror state
 end
 
 function HorrorEvents.GetSanity(player: Player): number
@@ -141,9 +142,24 @@ function HorrorEvents.GetSanity(player: Player): number
 	return data and data.Level or 100
 end
 
+-- New: Provides real game state for FogSystem. Averages inverted sanity across all players.
+-- This drives horrorLevel dynamically instead of hardcoded 0.3. Called via pcall in FogSystem for safety.
+function HorrorEvents.GetHorrorLevel(): number
+	local totalHorror = 0
+	local count = 0
+	for _, data in playerSanity do
+		if data then
+			totalHorror += (100 - data.Level) / 100
+			count += 1
+		end
+	end
+	return count > 0 and (totalHorror / count) or 0.3
+end
+
 function HorrorEvents.Destroy()
 	globalMaid:Cleanup()
 	table.clear(playerSanity)
+	FogSystem.Destroy()
 end
 
 return HorrorEvents

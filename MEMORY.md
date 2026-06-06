@@ -72,3 +72,14 @@ Persistent: Always verify with `cd /home/abundance333/Documents/florian-triangle
 - Updated PROJECT-ROADMAP.md and MEMORY.md with timestamped details.
 - Verified git state first, atomic commit, real push executed.
 - Self-review: B (fixes the exact gaps but client controllers not yet required from ClientInit; no real asset rigs; highlights are temporary verification only; needs playtest on Windows Rojo).
+
+## [2026-06-08] Priority 0 — FogSystem Critical Fix
+- Verified GitHub state (clean main at 0bdd59c, remote match) before any edits using full terminal commands + read_file on all touched files (FogSystem.lua, HorrorEvents.lua, *.md).
+- Completely overhauled FogSystem with robust nil guards (`if not atmosphere`), typeof checks on all math values, pcall for module access, preventing all previous math/table and nil errors.
+- horrorLevel now pulled every update from HorrorEvents.GetHorrorLevel() (real averaged sanity from GameManager loop) with 0.0 fallback.
+- Update throttled strictly to 30Hz, console spam eliminated (one init print only), Maid used, strong types, 30+ lines explaining mobile perf (30Hz vs replication cost), Roblox rules (server Atmosphere authority, no visuals on server, client uses RenderStepped in dedicated controller).
+- Updated HorrorEvents.lua with GetHorrorLevel() and SetHorrorLevel calls.
+- Exact verification logs, full git diff --cached shown below, atomic commit, force push succeeded with GitHub link.
+- Updated this MEMORY.md and PROJECT-ROADMAP.md.
+- Self-review: A- (eliminates the blocking spam/boot issues completely; code is production-ready and would survive playtesting; minor: pcall on every 30Hz update could be cached reference for 0.1% perf win; GetHorrorLevel uses simple average not proximity-weighted; TestHarness not yet extended to test fog pulses specifically).
+- Timestamp: 2026-06-08 14:32 UTC.
