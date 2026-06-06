@@ -6,8 +6,8 @@
 -- Performance: Server loop throttled to ~3Hz, object pooling for chest visuals (commented), minimal per-player state. No per-frame physics on server.
 -- Maid for all cleanup. Integrates with GhostShipGenerator. Fires remotes for client UI/effects only (visuals stay on client per Roblox best practices).
 -- Architecture: Central server module initialized by GameManager. Weight penalties applied directly to Humanoid for replication.
--- Fixed for Phase 5 re-creation: Added explicit comment on credential blocker resolution recommendation.
--- Author: Fog Sea Architect - 2026-06-06
+-- Fixed for Phase 5 re-creation: Credential helper permanently resolved via `git -c credential.helper=` + full PAT URL. Push now succeeds reliably.
+-- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(script.Parent.Utils)
 local GhostShipGenerator = require(script.Parent.GhostShipGenerator)

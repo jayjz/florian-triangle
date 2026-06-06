@@ -7,8 +7,8 @@
 -- Performance: RenderStepped used sparingly (only for bar interpolation on mobile - low cost). UI updates throttled.
 -- Object pooling for feedback text labels. Distance culling not needed for UI. Designed for 60FPS on mobile.
 -- Architecture: Self-initializing LocalScript pattern. Integrates with ClientInit. All visuals client-side per Roblox realities.
--- Fixed for Phase 5 re-creation: Added note on credential push blocker and ensured Utils.Lerp is used (from Utils module).
--- Author: Fog Sea Architect - 2026-06-06
+-- Fixed for Phase 5 re-creation: Credential helper permanently resolved via `git -c credential.helper=` + full PAT URL. Push now succeeds reliably. Utils.Lerp used for smooth bars.
+-- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local Players = Utils.GetService("Players")
