@@ -12,10 +12,10 @@ local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local maid = Utils.CreateMaid()
 
 local Controllers = {
-	UI = require(script.Controllers.ClientUIController),
-	Ship = require(script.Controllers.ClientShipController),
-	Combat = require(script.Controllers.ClientCombatController),
-	Horror = require(script.Controllers.ClientHorrorController),
+    UI = require(script.Parent.Controllers.ClientUIController),
+    Ship = require(script.Parent.Controllers.ClientShipController),
+    Combat = require(script.Parent.Controllers.ClientCombatController),
+    Horror = require(script.Parent.Controllers.ClientHorrorController),
 } :: {[string]: {Initialize: (() -> ())?, Maid: any?}}
 
 local function init()
