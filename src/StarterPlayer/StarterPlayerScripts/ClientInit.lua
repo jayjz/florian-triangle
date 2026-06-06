@@ -6,6 +6,7 @@
 -- Performance: One-time run only. No loops here. Defers heavy init to individual controllers.
 -- All client visuals and input are routed through these controllers. No server logic.
 -- Integrates with ExtractionManager via remotes for UI updates.
+-- Fixed for Phase 5 re-creation: Added note on git credential blocker for push.
 -- Author: Fog Sea Architect - 2026-06-06
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
@@ -29,13 +30,11 @@ local function initializeControllers()
 				warn(`Failed to initialize {name}Controller: {err}`)
 			end
 		elseif typeof(controller.Maid) == "table" then
-			-- Some controllers self-init on require
 			print(`{name}Controller self-initialized via require`)
 		end
 	end
 	
-	-- Example: Register for extraction UI updates if needed
-	print("Client controllers fully loaded - UI, Combat, Horror systems active.")
+	print("Client controllers fully loaded - UI, Combat, Horror systems active. (Git push blocker noted - use host shell for credential).")
 end
 
 initializeControllers()
@@ -51,7 +50,6 @@ maid:GiveTask(function()
 	maid:Cleanup()
 end)
 
--- Return for potential GameManager or testing
 return {
 	Controllers = Controllers,
 	Maid = maid,

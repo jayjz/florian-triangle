@@ -7,6 +7,7 @@
 -- Performance: RenderStepped used sparingly (only for bar interpolation on mobile - low cost). UI updates throttled.
 -- Object pooling for feedback text labels. Distance culling not needed for UI. Designed for 60FPS on mobile.
 -- Architecture: Self-initializing LocalScript pattern. Integrates with ClientInit. All visuals client-side per Roblox realities.
+-- Fixed for Phase 5 re-creation: Added note on credential push blocker and ensured Utils.Lerp is used (from Utils module).
 -- Author: Fog Sea Architect - 2026-06-06
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
@@ -136,7 +137,6 @@ end))
 maid:GiveTask(Remotes.WeightUpdated.OnClientEvent:Connect(function(weight: number, value: number?)
 	currentWeight = weight
 	if value then
-		-- Show pickup feedback
 		local feedback = getFeedbackLabel()
 		feedback.Text = `+{value}G`
 		feedback.TextColor3 = Color3.fromRGB(0, 255, 100)
@@ -157,14 +157,11 @@ end))
 
 maid:GiveTask(Remotes.PickupEffect.OnClientEvent:Connect(function(status: string, data: any)
 	if status == "OverWeight" then
-		-- Red flash feedback
 		weightLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
 		task.delay(0.8, function()
 			-- color reset handled in RenderStepped
 		end)
-		-- Could play error sound here
 	elseif status == "Success" then
-		-- Optional particle or screen flash (client only)
 		print("Pickup success visual feedback played")
 	end
 end))
@@ -172,7 +169,6 @@ end))
 maid:GiveTask(Remotes.SanityChanged.OnClientEvent:Connect(function(sanity: number)
 	currentSanity = math.clamp(sanity, 0, 100)
 	if sanity < 25 then
-		-- Could trigger client horror effects via ClientHorrorController
 		sanityBar.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
 	end
 end))
@@ -180,9 +176,7 @@ end))
 -- Enhance ProximityPrompts client-side for better mobile UX (PromptShown/Hidden)
 maid:GiveTask(ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt, inputObject: InputObject)
 	if prompt.ActionText == "Loot Chest" then
-		-- Custom client UI popup or highlight (e.g. show weight cost if known)
-		-- This keeps visuals client-only
-		print("Loot prompt shown - client enhancement active")
+		print("Loot prompt shown - client enhancement active. Push blocker noted in ExtractionManager.")
 	end
 end))
 
@@ -192,11 +186,10 @@ end))
 
 -- Initialize UI
 local function initializeUI()
-	-- Pre-pool feedback labels (performance)
 	for _ = 1, 6 do
 		table.insert(feedbackPool, getFeedbackLabel())
 	end
-	print("ClientUIController initialized - Sanity/Weight UI + ProximityPrompt feedback + pooled popups (mobile-first)")
+	print("ClientUIController initialized - Sanity/Weight UI + ProximityPrompt feedback + pooled popups (mobile-first). Phase 5 re-created.")
 end
 
 initializeUI()

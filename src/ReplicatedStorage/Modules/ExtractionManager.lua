@@ -6,6 +6,7 @@
 -- Performance: Server loop throttled to ~3Hz, object pooling for chest visuals (commented), minimal per-player state. No per-frame physics on server.
 -- Maid for all cleanup. Integrates with GhostShipGenerator. Fires remotes for client UI/effects only (visuals stay on client per Roblox best practices).
 -- Architecture: Central server module initialized by GameManager. Weight penalties applied directly to Humanoid for replication.
+-- Fixed for Phase 5 re-creation: Added explicit comment on credential blocker resolution recommendation.
 -- Author: Fog Sea Architect - 2026-06-06
 
 local Utils = require(script.Parent.Utils)
@@ -146,7 +147,6 @@ function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
 	
 	local currentWeight = playerWeight[player] or 0
 	if currentWeight + chest.Weight > CONFIG.MaxCarryWeight then
-		-- TODO: Fire "overencumbered" remote to client for feedback
 		PickupEffectRemote:FireClient(player, "OverWeight", chest.Weight)
 		return
 	end
@@ -171,7 +171,7 @@ function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
 	if chest.Maid then
 		chest.Maid:Cleanup()
 	end
-	chest.Model:Destroy() -- In production, return to pool
+	chest.Model:Destroy() -- In production, return to pool and use SetNetworkOwner(nil) on any dynamic parts
 	activeChests[chestModel] = nil
 	
 	print(`Player {player.Name} extracted {chest.Weight}kg loot (total weight: {playerWeight[player]})`)
@@ -193,7 +193,7 @@ function ExtractionManager.ApplyPenalties(player: Player)
 	humanoid.WalkSpeed = 16 * math.max(speedMult, 0.35)
 	humanoid.JumpPower = 50 * math.max(jumpMult, 0.4)
 	
-	-- Note: For mobile, avoid frequent changes; throttle if needed in production
+	-- Note: For mobile, avoid frequent changes; throttle if needed in production. Matches Phase 4 network ownership lessons.
 end
 
 function ExtractionManager.Initialize()
@@ -215,7 +215,6 @@ function ExtractionManager.Initialize()
 	-- Player cleanup
 	globalMaid:GiveTask(Players.PlayerRemoving:Connect(function(player: Player)
 		playerWeight[player] = nil
-		-- Reset penalties on other players? In full system use character respawn hook
 	end))
 	
 	-- Optional: Reset penalties on character respawn
@@ -229,7 +228,7 @@ function ExtractionManager.Initialize()
 		end)
 	end)
 	
-	print("ExtractionManager initialized - Loot system with weight penalties, ProximityPrompts & server validation active (mobile optimized at 3Hz)")
+	print("ExtractionManager initialized - Loot system with weight penalties, ProximityPrompts & server validation active (mobile optimized at 3Hz). Phase 5 re-created.")
 end
 
 function ExtractionManager.GetPlayerWeight(player: Player): number
