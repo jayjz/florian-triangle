@@ -1,16 +1,17 @@
 --!strict
 -- TestHarness.lua (ServerScriptService)
--- Expanded debug menu for Phase 7. RemoteEvent "AdminDebugCommand" now includes "fullTestScenario" that spawns ship + chests + entities + applies difficulty.
+-- Expanded debug menu for Phase 7. RemoteEvent "AdminDebugCommand" includes "fullTestScenario" that spawns complete round (ship + 3 chests + 2 entities + difficulty + GameManager init).
 -- Server-authoritative. Uses existing generators/managers. Validates all commands (anti-exploit).
 -- Maid for test cleanup. Performance: One-shot only, defers to 3Hz/5Hz subsystem loops. No persistent work.
 -- Architecture: Called from GameManager or chat. All spawning on server; visuals via remotes to client controllers only. Studio guard.
--- Asset binding: All spawns reference ServerStorage.Assets.*Rig placeholders (rigged models with animations to be bound in prod).
+-- Asset binding: All spawns reference ServerStorage.Assets.*Rig placeholders (rigged models with animations to be bound in prod). Uses CollectionService tags.
 -- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local GhostShipGenerator = require(game.ReplicatedStorage.Modules.GhostShipGenerator)
 local ExtractionManager = require(game.ReplicatedStorage.Modules.ExtractionManager)
 local EntityAI = require(game.ReplicatedStorage.Modules.EntityAI)
+local GameManager = require(game.ServerScriptService.GameManager)
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
 
@@ -40,18 +41,19 @@ local function executeDebugCommand(player: Player, command: DebugCommand, param:
 	end
 	
 	if command == "fullTestScenario" then
-		-- Full test: ship + 3 chests + 4 entities + difficulty
+		-- Complete round: ship + 3 chests + 2 entities + difficulty + GameManager init
+		GameManager.Initialize() -- Ensure full orchestration
 		local ship = GhostShipGenerator.CreateTestShip(center) -- Placeholder for ServerStorage.Assets.GhostShipRig
 		for i = 1, 3 do
 			ExtractionManager.CreateTestChest(ship)
 		end
-		for i = 1, 4 do
+		for i = 1, 2 do
 			local e = EntityAI.SpawnTestEntity(center + Vector3.new(i*12, 0, 0))
 			if e.Root then e.Root:SetNetworkOwner(nil) end
 			testMaid:GiveTask(e.Model)
 		end
 		currentDifficulty = param or 2
-		print(`Full test scenario spawned by {player.Name} at difficulty {currentDifficulty}`)
+		print(`Full test scenario spawned by {player.Name} at difficulty {currentDifficulty} with GameManager init`)
 	elseif command == "spawnTestShip" then
 		local ship = GhostShipGenerator.CreateTestShip(center)
 		for i = 1, 3 do
@@ -99,7 +101,7 @@ function TestHarness.Initialize()
 		end
 	end)
 	
-	print("TestHarness expanded with fullTestScenario (asset binding notes, Maid, server authority, mobile comments).")
+	print("TestHarness expanded with fullTestScenario (asset binding notes, Maid, server authority, mobile comments, GameManager init).")
 end
 
 function TestHarness.Destroy()

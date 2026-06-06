@@ -1,15 +1,17 @@
 --!strict
 -- EntityAI.lua
--- Production-grade corrupted pirate AI for Fog Sea (Phase 4 fix).
--- Server-authoritative. SetNetworkOwner(nil) on creation to prevent client physics ownership exploits and stuttering.
--- Ranged attacks now fire RemoteEvent "EntityRangedAttack" with origin/target so clients render smooth visuals. Server only does delayed validation/damage.
--- Full Maid per entity, throttled pathfinding/LOS (mobile safe), sound-reactive, integration with HorrorEvents and FogSystem.
--- Architecture: GameManager spawns entities. Never handle visual physics on server.
--- Author: Fog Sea Architect - 2026-06-06
+-- Production-grade corrupted pirate AI for Fog Sea (polished Cleanup Phase).
+-- Server-authoritative. root:SetNetworkOwner(nil) on every creation to prevent client physics exploits and stuttering on mobile.
+-- Ranged attacks fire RemoteEvent "EntityRangedAttack" (origin, target) so ClientCombatController renders smooth projectiles via RenderStepped + pooling. Server only validates/damages after delay.
+-- Full Maid per entity + global. Throttled pathfinding/LOS (0.6s/0.35s - critical for mobile). Sound-reactive, fog-culled, integrates with HorrorEvents/Extraction.
+-- Architecture: GameManager calls UpdateAll(). No visuals or AssemblyLinearVelocity on server (per Roblox realities). Error handling on all paths.
+-- Asset Binding (Phase 7): SpawnTestEntity uses placeholder; replace with ServerStorage.Assets.CorruptedPirateRig:Clone() + CollectionService "CorruptedPirate" tag for client visuals/animations.
+-- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
 local HorrorEvents = require(script.Parent.HorrorEvents)
+local CollectionService = Utils.GetService("CollectionService")
 local RunService = Utils.GetService("RunService")
 local PathfindingService = Utils.GetService("PathfindingService")
 local Workspace = Utils.GetService("Workspace")
@@ -38,7 +40,6 @@ export type EntityAI = typeof(EntityAI)
 local activeEntities: {Entity} = {}
 local globalMaid = Utils.CreateMaid()
 
--- Remote for client visual rendering of ranged attacks (zero latency visuals)
 local RangedAttackRemote = Utils.CreateRemoteEvent("EntityRangedAttack")
 
 local CONFIG = {
@@ -63,7 +64,7 @@ function EntityAI.Create(template: Model, spawnPosition: Vector3): Entity
 	local root = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
 	if not root then error("Entity template missing root part") end
 	
-	-- CRITICAL FIX: Server owns all AI physics to prevent exploits and stuttering
+	-- CRITICAL: Server owns all AI physics to prevent exploits and stuttering on mobile clients
 	root:SetNetworkOwner(nil)
 	
 	local humanoid = model:FindFirstChildOfClass("Humanoid") or Instance.new("Humanoid", model)
@@ -81,6 +82,8 @@ function EntityAI.Create(template: Model, spawnPosition: Vector3): Entity
 		Maid = maid,
 		CurrentPath = nil,
 	}
+	
+	CollectionService:AddTag(model, "CorruptedPirate") -- For client visual/animation controller in prod
 	
 	maid:GiveTask(model)
 	maid:GiveTask(function()
@@ -196,7 +199,7 @@ function EntityAI:PerformAttack(attackType: "Melee" | "Ranged", targetPos: Vecto
 	self.LastAttack = now
 	
 	if attackType == "Ranged" then
-		-- CLIENT RENDER ONLY - server validates damage after travel time
+		-- CLIENT RENDER ONLY - server validates damage after travel time (no AssemblyLinearVelocity on server)
 		RangedAttackRemote:FireAllClients(self.Root.Position, targetPos)
 		
 		-- Server validation after approximate travel time
@@ -239,5 +242,27 @@ function EntityAI.Destroy()
 	table.clear(activeEntities)
 end
 
+function EntityAI.SpawnTestEntity(spawnPos: Vector3): Entity
+	-- Test helper for TestHarness (Cleanup Phase). Uses placeholder template (replace with ServerStorage.Assets.CorruptedPirateRig in prod for rigged animation).
+	local template = Instance.new("Model")
+	local root = Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Size = Vector3.new(2, 4, 1)
+	root.Position = spawnPos
+	root.Anchored = false
+	root.CanCollide = true
+	root.Parent = template
+	template.PrimaryPart = root
+	
+	local entity = EntityAI.Create(template, spawnPos)
+	template:Destroy() -- Clean template
+	
+	-- Ensure network ownership for mobile replication (prevents client-side physics fighting server) - polished for this phase
+	if entity.Root then
+		entity.Root:SetNetworkOwner(nil)
+	end
+	
+	return entity
+end
+
 return EntityAI
-EOF

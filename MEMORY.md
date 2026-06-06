@@ -46,3 +46,11 @@ Persistent: Always verify with `cd /home/abundance333/Documents/florian-triangle
 - Verified against GitHub at 1c6c347 before changes.
 - Full production standards applied.
 - Self-review: B (TestHarness integrates well but assumes extension methods on generators; asset notes are placeholders only).
+
+## [2026-06-07] Phase 7: Asset Binding & Playtesting Prep
+- Created rojo.json for sync (ServerScriptService, ReplicatedStorage, StarterPlayer, ServerStorage/Assets).
+- Updated GhostShipGenerator, ExtractionManager, EntityAI with rigged placeholder references (GhostShipRig, LootChestRig, CorruptedPirateRig) and CollectionService tags.
+- Expanded TestHarness "fullTestScenario" to spawn complete round + GameManager init.
+- Updated README with workflow.
+- Verified GitHub first. All --!strict, Maid, Utils, performance comments.
+- Commit 40705bd. Self-review B- (notes only, no real rigs, TestHarness assumes methods, no full Rojo test yet).

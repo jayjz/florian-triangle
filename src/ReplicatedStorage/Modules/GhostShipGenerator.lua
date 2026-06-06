@@ -2,13 +2,14 @@
 -- GhostShipGenerator.lua
 -- Procedural haunted ship spawning system for Fog Sea.
 -- Server authoritative. Spawns ships at distance in fog with increasing difficulty.
--- Performance: Runs at 0.5Hz, uses object pooling for ship parts, minimal per-frame work.
+-- Performance: Runs at 0.5Hz, uses object pooling for ship parts, minimal per-frame work (mobile safe).
 -- Integrates with FogSystem for visibility culling.
--- Asset Binding (Phase 7): Use ServerStorage.Assets.GhostShipRig:Clone() for production rigged model with sails, lights, haunted effects. Use CollectionService "GhostShip" tag for ClientShipController visuals. Current procedural Part is placeholder for testing. Maid for cleanup.
+-- Asset Binding (Phase 7): Use ServerStorage.Assets.GhostShipRig:Clone() for production rigged model with sails/animations. Tag with CollectionService "GhostShip" for ClientShipController visuals. Current procedural Part is placeholder for testing. Maid for cleanup.
 -- Author: Fog Sea Architect - 2026-06-07
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
+local CollectionService = Utils.GetService("CollectionService")
 local RunService = Utils.GetService("RunService")
 local Workspace = Utils.GetService("Workspace")
 
@@ -61,6 +62,8 @@ local function createGhostShip(difficulty: number): GhostShip
 		mast.Position = hull.Position + Vector3.new(0, 15, (i-1.5)*20)
 		mast.Parent = shipModel
 	end
+	
+	CollectionService:AddTag(shipModel, "GhostShip") -- For client visual controller
 	
 	local ship: GhostShip = {
 		Model = shipModel,
