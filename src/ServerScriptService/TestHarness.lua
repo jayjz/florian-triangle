@@ -122,4 +122,13 @@ end
 
 TestHarness.Initialize()
 
+-- Expose to _G for Studio Command Bar testing
+_G.ForceTestScenario = function(playerId: number?)
+    local target = playerId and game.Players:GetPlayerByUserId(playerId) or game.Players:GetPlayers()[1]
+    if target then
+        AdminDebugRemote:FireServer("fullTestScenario", 3) -- or simulate the server-side execution directly
+        executeDebugCommand(target, "fullTestScenario", 3)
+    end
+end
+
 return TestHarness
