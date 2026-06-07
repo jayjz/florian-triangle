@@ -1,6 +1,6 @@
 --!strict
 -- HorrorEvents.lua (ReplicatedStorage/Modules)
--- Clean, production horror & sanity system.
+-- Production horror & sanity system.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
@@ -16,17 +16,18 @@ local globalMaid = Utils.CreateMaid()
 local Remotes = {
     SanityChanged = Utils.CreateRemoteEvent("SanityChanged"),
     HorrorPulse = Utils.CreateRemoteEvent("HorrorPulse"),
+    HallucinationTriggered = Utils.CreateRemoteEvent("HallucinationTriggered"),
 }
 
 local CONFIG = {
-    BaseDecay = 3.5,
+    BaseDecay = 3.8,
     FogMultiplier = 2.8,
     UpdateRate = 0.25,
     HallucinationThreshold = 45,
 }
 
 function HorrorEvents.Initialize()
-    globalMaid:GiveTask(RunService.Heartbeat:Connect(function(dt)
+    globalMaid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
         HorrorEvents:Update(dt)
     end))
 
@@ -48,7 +49,7 @@ function HorrorEvents:Update(dt: number)
         if not root then continue end
 
         local inDenseFog = FogSystem.GetVisibilityDistance() < 60
-        local decay = CONFIG.BaseDecay * (inDenseFog and CONFIG.FogMultiplier or 1)
+        local decay = CONFIG.BaseDecay * (inDenseFog and CONFIG.FogMultiplier or 1.0)
 
         playerSanity[player] = Utils.Clamp(level - (decay * dt), 0, 100)
         Remotes.SanityChanged:FireClient(player, math.floor(playerSanity[player]))
@@ -56,9 +57,9 @@ function HorrorEvents:Update(dt: number)
 end
 
 function HorrorEvents.TriggerHorrorPulse(intensity: number)
-    local safeIntensity = Utils.Clamp(intensity or 0, 0, 2)
-    Remotes.HorrorPulse:FireAllClients(safeIntensity)
-    FogSystem.TriggerHorrorPulse(safeIntensity)
+    local safe = Utils.Clamp(intensity, 0, 2)
+    Remotes.HorrorPulse:FireAllClients(safe)
+    FogSystem.TriggerHorrorPulse(safe)
 end
 
 function HorrorEvents.GetHorrorLevel(): number
@@ -68,10 +69,6 @@ function HorrorEvents.GetHorrorLevel(): number
         count += 1
     end
     return count > 0 and (total / count) or 0.2
-end
-
-function HorrorEvents.GetSanity(player: Player): number
-    return playerSanity[player] or 100
 end
 
 function HorrorEvents.Destroy()

@@ -1,7 +1,7 @@
 --!strict
 -- ExtractionManager.lua (ReplicatedStorage/Modules)
--- Production extraction + weight system for Fog Sea.
--- Now includes proper Extraction Zone + Win Condition support.
+-- Production extraction + weight + quota system for Fog Sea.
+-- One Piece themed: Players must bring loot to the Cursed Beacon to pay the toll and escape the Florian Triangle.
 
 local Utils = require(script.Parent.Utils)
 local GhostShipGenerator = require(script.Parent.GhostShipGenerator)
@@ -23,7 +23,6 @@ export type LootChest = {
 
 local activeChests: { [Model]: LootChest } = {}
 local playerWeight: { [Player]: number } = {}
-local playerExtracted: { [Player]: number } = {} -- Total successfully extracted (for win condition)
 local globalMaid = Utils.CreateMaid()
 
 local WeightUpdateRemote = Utils.CreateRemoteEvent("WeightUpdated")
@@ -146,7 +145,7 @@ function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
     activeChests[chestModel] = nil
 end
 
--- ==================== EXTRACTION ZONE (NEW) ====================
+-- ==================== EXTRACTION ZONE (Win Condition) ====================
 
 function ExtractionManager.ExtractAtZone(player: Player, zonePosition: Vector3, radius: number): boolean
     local char = player.Character
@@ -159,8 +158,11 @@ function ExtractionManager.ExtractAtZone(player: Player, zonePosition: Vector3, 
     local carried = playerWeight[player] or 0
     if carried <= 0 then return false end
 
-    -- Success! Move carried loot into extracted total
-    playerExtracted[player] = (playerExtracted[player] or 0) + carried
+    -- Bank the loot toward quota
+    if typeof(RoundManager) == "table" and typeof(RoundManager.AddExtracted) == "function" then
+        RoundManager.AddExtracted(carried)
+    end
+
     playerWeight[player] = 0
 
     ExtractionSuccessRemote:FireClient(player, carried)
@@ -170,13 +172,7 @@ function ExtractionManager.ExtractAtZone(player: Player, zonePosition: Vector3, 
     return true
 end
 
-function ExtractionManager.GetPlayerWeight(player: Player): number
-    return playerWeight[player] or 0
-end
-
-function ExtractionManager.GetPlayerExtracted(player: Player): number
-    return playerExtracted[player] or 0
-end
+-- ==================== PENALTIES & HELPERS ====================
 
 function ExtractionManager.ApplyPenalties(player: Player)
     local char = player.Character
@@ -191,7 +187,11 @@ function ExtractionManager.ApplyPenalties(player: Player)
     hum.JumpPower = 50 * (1 - ratio * CONFIG.JumpPenaltyMultiplier)
 end
 
--- ==================== INITIALIZATION ====================
+function ExtractionManager.GetPlayerWeight(player: Player): number
+    return playerWeight[player] or 0
+end
+
+-- ==================== INITIALIZATION & CLEANUP ====================
 
 function ExtractionManager.Initialize()
     globalMaid:GiveTask(RunService.Heartbeat:Connect(function()
@@ -209,10 +209,9 @@ function ExtractionManager.Initialize()
 
     globalMaid:GiveTask(Players.PlayerRemoving:Connect(function(p)
         playerWeight[p] = nil
-        playerExtracted[p] = nil
     end))
 
-    print("[ExtractionManager] Initialized with Extraction Zone support")
+    print("[ExtractionManager] Initialized with quota-integrated extraction")
 end
 
 function ExtractionManager.Destroy()
@@ -223,7 +222,6 @@ function ExtractionManager.Destroy()
     end
     table.clear(activeChests)
     table.clear(playerWeight)
-    table.clear(playerExtracted)
     table.clear(chestPool)
 end
 
