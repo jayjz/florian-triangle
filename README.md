@@ -1,36 +1,110 @@
-# Florian Triangle (Fog Sea)
+# ONE TREASURE PIECE [HORROR]
 
-**3-6 player co-op survival horror extraction game inspired by One Piece's Florian Triangle.**
+> *"The Smothering Mist doesn't just take your sight. It takes your crew, your sanity, and eventually... it takes you."*
 
-Sail a mobile ship through perpetual dense fog. Detect haunted ghost ships. Dock, scavenge cursed relics under rising supernatural pressure, extract valuable treasure, and escape alive with your crew.
-
-## Current Status (Phase 7 - Asset Binding & Playtesting Prep, B-)
-- rojo.json renamed/updated to default.project.json for Rojo sync (includes ServerStorage/Assets).
-- src/ServerStorage/Assets folder created.
-- Asset binding made concrete in GhostShipGenerator, ExtractionManager, EntityAI with ServerStorage.Assets.*Rig references (placeholder logic) and CollectionService tags.
-- TestHarness "fullTestScenario" fixed with GameManager init guard and complete round spawn.
-- Updated this README and PROJECT-ROADMAP.md with accurate status and next steps (Rojo sync on Windows PC + Studio testing with TestHarness).
-- All files follow non-negotiables (--!strict, Maid, Utils, performance comments). Server skeleton strong but visuals/asset readiness skeletal (B- overall).
-
-## Development Workflow (for Windows PC)
-1. **Rojo Sync**: Copy default.project.json to project root if needed. Run `rojo serve` in terminal (syncs src/ to Studio place).
-2. **Studio Testing on Main PC**: Open place in Roblox Studio. Use TestHarness commands (RemoteEvent "AdminDebugCommand" with "fullTestScenario" or chat /debug full). Verify spawning, tags, NetworkOwner(nil), performance.
-3. **Mobile Emulator Notes**: In Studio, switch to mobile device emulator (iPhone 11), throttle CPU. Test extraction loop (3Hz), AI pathfinding, UI lerp on RenderStepped, replication lag with multiple players.
-4. **Asset Binding**: Place rigged .rbxm models in ServerStorage.Assets (GhostShipRig, LootChestRig, CorruptedPirateRig). Update placeholder logic in generators to use :FindFirstChild("RigName") or Clone(). Add CollectionService tags for client controllers to consume.
-5. **GitHub**: Always run verification commands first. Use full diffs, atomic commits. Credential helper may require `-c credential.helper=` for push in some envs.
-6. **Playtesting Prep**: Multiplayer test (PC + mobile) for sanity/extraction, fog culling, co-op sailing. Use TestHarness for quick rounds.
-
-See PROJECT-ROADMAP.md for phases/gaps and lua-best-practices.md for standards.
-
-## Core Loop
-1. **Sail** — Navigate treacherous fog waters (mobile-first ship controls)
-2. **Detect** — Spot and approach ghost ships in the mist
-3. **Dock & Scavenge** — Board decaying vessels filled with horror and opportunity
-4. **Extract** — Secure cursed treasure while horrors awaken
-5. **Survive** — Escape before the ship (or your sanity) collapses
-
-**"Even in the Florian Triangle... a crew that sticks together can make it through anything."**
+![Roblox](https://img.shields.io/badge/Roblox-Studio-blue?style=for-the-badge&logo=roblox)
+![Rojo](https://img.shields.io/badge/Rojo-7.4+-red?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Alpha-yellow?style=for-the-badge)
 
 ---
-**Current Phase**: 7 - Asset Binding & Playtesting Prep (B-)
-**Architect**: Fog Sea Architect - 2026-06-07
+
+## 📖 Project Vision
+
+**ONE TREASURE PIECE [HORROR]** is a 3-6 player co-operative survival horror extraction game that drops players into the cursed waters of the Florian Triangle from One Piece lore. This is not a fan game—this is a psychological horror experience that weaponizes the themes of resilience, crew bonds, and hope against overwhelming dread.
+
+### The Core Fantasy
+You and your crew sail a living ship through an ever-encroaching green mist that actively hunts you. The "Smothering Mist" is not a weather effect—it's a malevolent entity that:
+
+* Reduces visibility to near-zero in dense pockets.
+* Drains sanity the longer you're exposed.
+* Spawns hallucinations — shadow Luffy figures, whispers in the fog, fake crewmates calling for help.
+* Accelerates as horror escalates, forcing impossible decisions.
+
+**Your mission:** Board haunted ghost ships, scavenge cursed treasure (with brutal weight penalties), and extract at the Cursed Beacon before the mist claims your entire crew.
+
+*This is Doors + Pressure meets Lethal Company with a One Piece soul—5 to 12 minutes of pure co-op tension where communication isn't just helpful, it's survival.*
+
+---
+
+## 🎮 Gameplay Loop
+
+### 1. The Lobby - Foosha Village
+Players spawn in Foosha Village with full UI, loadout selection, and crew formation. The windmill spins lazily overhead, but the horizon is already green.
+
+### 2. Deployment - Windmill Village
+The ship spawns at Windmill Village. Crew boards, roles are assigned (Captain, Navigator, Lookout), and the mist clock starts ticking.
+
+### 3. The Sail
+* Navigate the living ship through narrowing safe zones.
+* `FogSystem` dynamically closes the circle—faster as horror level increases.
+* Speed penalties apply based on total loot weight.
+* Ghost ships spawn with modular interiors and cursed loot.
+
+### 4. Boarding Actions
+Dock with a ghost ship:
+* Breach the hull (timed interaction).
+* Split the crew or stay together (risk/reward).
+* Scavenge treasure (weight matters—a gold chest slows you to a crawl).
+* Survive horror events (sanity checks, hallucinations, audio jumpscares).
+* **Communicate constantly:** *"I can't see you—lead me back to the ship!"*
+
+### 5. Extraction
+Reach the Cursed Beacon extraction zone:
+* Pay the toll (meet quota or lose everything).
+* Survive the final horror pulse.
+* Extract with remaining crew.
+* Failed extractions trigger crew-wide sanity penalties.
+
+### 6. Horror Escalation
+Each round intensifies:
+* Sanity decay accelerates in dense fog.
+* Horror pulses trigger screen distortions, fake entities, whispers.
+* Fake crewmates appear on your screen only (gaslighting mechanic).
+* Audio paranoia — distant screams, footsteps behind you that aren't real.
+
+**Win condition:** Extract with quota met.  
+**Lose condition:** Full crew wipe, quota failure, or mist consumption.
+
+---
+
+## 🏗️ Tech Stack & Architecture
+
+### Core Technologies
+* **Roblox Studio** (Latest)
+* **Rojo 7.4+** for external code sync
+* **Luau** with strict type checking (`--!strict`)
+* **Knit Framework** (in evaluation for Phase 2)
+
+### Repository Structure
+```text
+├── src/
+│   ├── ServerScriptService/
+│   │   ├── GameManager.server.lua        # Orchestrates round lifecycle
+│   │   ├── RoundManager.server.lua       # Manages match phases
+│   │   ├── LobbyManager.server.lua       # Foosha Village logic
+│   │   └── Services/
+│   │       ├── SanityService.lua         # Sanity decay & hallucinations
+│   │       ├── FogService.lua            # Smothering Mist simulation
+│   │       └── ExtractionService.lua     # Beacon & quota handling
+│   ├── ReplicatedStorage/
+│   │   ├── Modules/
+│   │   │   ├── FogSystem.lua             # Dynamic circle closing
+│   │   │   ├── HorrorEvents.lua          # Event dispatcher
+│   │   │   ├── ShipController.lua        # Living ship physics
+│   │   │   ├── LootSystem.lua            # Weight & inventory
+│   │   │   └── SanityFX.lua              # Client-side effects
+│   │   └── Shared/
+│   │       ├── Config.lua                # Tunables & balance
+│   │       └── Types.lua                 # Type definitions
+│   └── StarterPlayer/
+│       └── StarterPlayerScripts/
+│           └── Controllers/
+│               ├── SanityController.lua  # Client sanity sync
+│               ├── FogController.lua     # Fog rendering
+│               └── InputController.lua   # Mobile-first input
+├── assets/
+│   ├── models/                           # Ghost ships, islands
+│   ├── audio/                            # Whispers, ambiance
+│   └── fx/                               # Particle effects
+├── default.project.json                  # Rojo configuration
+└── README.md
