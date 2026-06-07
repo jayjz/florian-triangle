@@ -1,8 +1,8 @@
 --!strict
 -- ClientUIController.lua (StarterPlayerScripts/Controllers)
--- Client-only UI and HUD controller for Fog Sea.
--- Handles sanity bar, weight HUD, feedback popups, and tag-based visuals.
--- Pure client visuals. No server logic. Mobile-optimized with throttling and pooling.
+-- Client-only HUD and UI controller for Fog Sea.
+-- Manages sanity bar, weight display, floating feedback text, and tag-based visuals.
+-- Pure visuals. Mobile-optimized with throttling, pooling, and efficient RenderStepped.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local Players = Utils.GetService("Players")
@@ -21,7 +21,7 @@ local WeightUpdated = Utils.CreateRemoteEvent("WeightUpdated")
 local PickupEffect = Utils.CreateRemoteEvent("PickupEffect")
 local SanityChanged = Utils.CreateRemoteEvent("SanityChanged")
 
--- UI Container
+-- UI Elements
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FogSeaHUD"
 screenGui.ResetOnSpawn = false
@@ -73,11 +73,13 @@ weightBar.Position = UDim2.new(0.05, 0, 0.6, 0)
 weightBar.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
 weightBar.Parent = weightFrame
 
--- Feedback Pool (floating +X G loot text)
+-- Feedback Pool (floating +X G text)
 local feedbackPool: {TextLabel} = {}
 local currentSanity = 100
 local currentWeight = 0
 local MAX_WEIGHT = 80
+
+local lastTagTime: {[Model]: number} = {}
 
 local function getFeedbackLabel(): TextLabel
     if #feedbackPool > 0 then
@@ -85,7 +87,7 @@ local function getFeedbackLabel(): TextLabel
     end
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0, 160, 0, 45)
-    label.BackgroundTransparency = 0.3
+    label.BackgroundTransparency = 0.35
     label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     label.TextScaled = true
     label.Font = Enum.Font.GothamBold
@@ -99,9 +101,7 @@ local function recycleFeedback(label: TextLabel)
     table.insert(feedbackPool, label)
 end
 
--- Tag Handlers with Debounce
-local lastTagTime: {[Model]: number} = {}
-
+-- Tag Handlers (Debounced)
 local function onLootChestAdded(chest: Model)
     if lastTagTime[chest] and tick() - lastTagTime[chest] < 1.2 then return end
     lastTagTime[chest] = tick()
@@ -130,7 +130,7 @@ local function onGhostShipAdded(ship: Model)
     maid:GiveTask(highlight)
 end
 
--- RenderStepped HUD (throttled, smooth, mobile-friendly)
+-- RenderStepped HUD (smooth, efficient)
 maid:GiveTask(RunService.RenderStepped:Connect(function(dt: number)
     local sanityTarget = currentSanity / 100
     sanityBar.Size = UDim2.new(Utils.Lerp(sanityBar.Size.X.Scale, sanityTarget, 8 * dt), 0, 1, 0)
@@ -210,6 +210,7 @@ end
 function ClientUIController.Destroy()
     maid:Cleanup()
     screenGui:Destroy()
+
     for _, label in feedbackPool do
         if label then label:Destroy() end
     end
