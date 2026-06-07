@@ -1,6 +1,8 @@
 --!strict
 -- HorrorEvents.lua (ReplicatedStorage/Modules)
--- Production horror & sanity system.
+-- Production horror & sanity system. API fixed: TriggerHorrorPulse now takes intensity only (no player param per review). Uses FireAllClients for all players (Smothering Mist perception on client).
+-- No _G. Server calculates, clients perceive via remotes.
+-- Integrates with FogSystem for GlobalFogPhase.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
@@ -39,7 +41,7 @@ function HorrorEvents.Initialize()
         playerSanity[player] = nil
     end)
 
-    print("[HorrorEvents] Initialized")
+    print("[HorrorEvents] Initialized with fixed API (no player param on TriggerHorrorPulse)")
 end
 
 function HorrorEvents:Update(dt: number)
@@ -57,9 +59,9 @@ function HorrorEvents:Update(dt: number)
 end
 
 function HorrorEvents.TriggerHorrorPulse(intensity: number)
-    local safe = Utils.Clamp(intensity, 0, 2)
-    Remotes.HorrorPulse:FireAllClients(safe)
-    FogSystem.TriggerHorrorPulse(safe)
+    -- Fixed per Priority 0: intensity only, FireAllClients for group horror perception
+    Remotes.HorrorPulse:FireAllClients(Utils.Clamp(intensity, 0, 2))
+    FogSystem.TriggerHorrorPulse(intensity)
 end
 
 function HorrorEvents.GetHorrorLevel(): number
