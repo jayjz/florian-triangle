@@ -1,127 +1,110 @@
 --!strict
--- GhostShipGenerator.lua
--- Procedural haunted ship spawning system for Fog Sea.
--- Server authoritative. Spawns ships at distance in fog with increasing difficulty.
--- Performance: Runs at 0.5Hz, uses object pooling for ship parts, minimal per-frame work (mobile safe).
--- Integrates with FogSystem for visibility culling.
--- Asset Binding (Phase 7): Use ServerStorage.Assets.GhostShipRig:Clone() for production rigged model with sails/animations. Tag with CollectionService "GhostShip" for ClientShipController visuals. Current procedural Part is placeholder for testing. Maid for cleanup.
--- Author: Fog Sea Architect - 2026-06-07
+-- GhostShipGenerator.lua (ReplicatedStorage/Modules)
+-- Production server-authoritative ghost ship spawner for Fog Sea.
+-- Uses real GhostShipRig from ServerStorage.Assets. Mobile-optimized with network ownership.
 
 local Utils = require(script.Parent.Utils)
-local FogSystem = require(script.Parent.FogSystem)
 local CollectionService = Utils.GetService("CollectionService")
 local RunService = Utils.GetService("RunService")
-local Workspace = Utils.GetService("Workspace")
+local ServerStorage = Utils.GetService("ServerStorage")
 
 local GhostShipGenerator = {}
 GhostShipGenerator.__index = GhostShipGenerator
 
 export type GhostShip = {
-	Model: Model,
-	Difficulty: number,
-	HauntLevel: number,
-	LastSpawnTime: number,
-	Entities: { any },
+    Model: Model,
+    Difficulty: number,
+    LastSpawnTime: number,
 }
 
-export type Generator = typeof(GhostShipGenerator)
-
-local self = setmetatable({}, GhostShipGenerator)
-local maid = Utils.CreateMaid()
-local activeShips: { GhostShip } = {}
-local shipPool = Utils.CreateObjectPool(Instance.new("Model"), 5) -- Pool for ghost ship containers
+local activeShips: {GhostShip} = {}
+local globalMaid = Utils.CreateMaid()
 
 local CONFIG = {
-	SpawnDistance = 180,      -- Far enough to be in heavy fog
-	SpawnInterval = 25,       -- Seconds between potential spawns (mobile friendly)
-	MaxActiveShips = 4,       -- Critical limit for mobile performance
-	DifficultyRamp = 0.15,    -- Increases over time
+    MaxShips = 5,
+    SpawnDistance = 180,
+    CullDistance = 420,
+    SpawnChancePerTick = 0.035, -- ~every 28 seconds on average
 }
 
-local lastSpawnAttempt = 0
-local currentDifficulty = 1.0
+local ghostShipTemplate: Model? = nil
 
--- Creates a procedural ghost ship with randomized haunted elements (placeholder until rigged asset bound)
-local function createGhostShip(difficulty: number): GhostShip
-	local shipModel = shipPool:Get()
-	shipModel.Name = "GhostShip_" .. os.time()
-	
-	-- Asset Binding: Replace with ServerStorage.Assets.GhostShipRig:Clone() + random decal/parts for haunted look
-	local hull = Instance.new("Part")
-	hull.Size = Vector3.new(25, 8, 60)
-	hull.Color = Color3.fromRGB(45, 45, 55)
-	hull.Material = Enum.Material.Wood
-	hull.Position = Vector3.new(0, 0, 0)
-	hull.Parent = shipModel
-	shipModel.PrimaryPart = hull
-	
-	-- Add masts/sails as placeholder (rigged in prod)
-	for i = 1, 2 do
-		local mast = Instance.new("Part")
-		mast.Size = Vector3.new(2, 20, 2)
-		mast.Position = hull.Position + Vector3.new(0, 15, (i-1.5)*20)
-		mast.Parent = shipModel
-	end
-	
-	CollectionService:AddTag(shipModel, "GhostShip") -- For client visual controller
-	
-	local ship: GhostShip = {
-		Model = shipModel,
-		Difficulty = difficulty,
-		HauntLevel = 1.0 + difficulty * 0.5,
-		LastSpawnTime = tick(),
-		Entities = {},
-	}
-	
-	table.insert(activeShips, ship)
-	return ship
+local function getGhostShipTemplate(): Model?
+    if not ghostShipTemplate then
+        local assets = ServerStorage:FindFirstChild("Assets")
+        ghostShipTemplate = assets and assets:FindFirstChild("GhostShipRig")
+
+        if not ghostShipTemplate then
+            warn("[GhostShipGenerator] GhostShipRig not found in ServerStorage.Assets — using fallback")
+        end
+    end
+    return ghostShipTemplate
 end
 
-function GhostShipGenerator.Initialize()
-	maid:GiveTask(RunService.Heartbeat:Connect(function()
-		local now = tick()
-		if now - lastSpawnAttempt < CONFIG.SpawnInterval then return end
-		lastSpawnAttempt = now
-		
-		if #activeShips >= CONFIG.MaxActiveShips then return end
-		
-		currentDifficulty = currentDifficulty + CONFIG.DifficultyRamp
-		local spawnPos = Vector3.new(math.random(-200,200), 0, math.random(-200,200))
-		local ship = createGhostShip(currentDifficulty)
-		ship.Model:PivotTo(CFrame.new(spawnPos))
-		
-		print("GhostShipGenerator: Spawned ship at difficulty " .. currentDifficulty)
-	end))
-	
-	print("GhostShipGenerator initialized with asset binding notes for ServerStorage rigged models.")
-end
+function GhostShipGenerator.SpawnGhostShip(difficulty: number?): GhostShip?
+    local template = getGhostShipTemplate()
+    if not template then return nil end
 
-function GhostShipGenerator.CreateTestShip(center: Vector3): GhostShip
-	-- Test helper for TestHarness (Phase 7). Uses placeholder; bind to ServerStorage.Assets.GhostShipRig in prod.
-	return createGhostShip(currentDifficulty)
-end
+    local ship = template:Clone()
+    ship:PivotTo(CFrame.new(
+        math.random(-CONFIG.SpawnDistance, CONFIG.SpawnDistance),
+        18,
+        math.random(-CONFIG.SpawnDistance, CONFIG.SpawnDistance)
+    ))
+    ship.Parent = workspace
 
-function GhostShipGenerator.CullDistantShips(center: Vector3)
-	-- Cull ships outside fog visibility (mobile performance)
-	for i = #activeShips, 1, -1 do
-		local ship = activeShips[i]
-		if (ship.Model.PrimaryPart.Position - center).Magnitude > 300 then
-			ship.Model:Destroy()
-			table.remove(activeShips, i)
-		end
-	end
+    CollectionService:AddTag(ship, "GhostShip")
+
+    -- Critical for mobile: Server owns all physics
+    for _, descendant in ship:GetDescendants() do
+        if descendant:IsA("BasePart") then
+            descendant:SetNetworkOwner(nil)
+        end
+    end
+
+    local ghostShip: GhostShip = {
+        Model = ship,
+        Difficulty = difficulty or 1.0,
+        LastSpawnTime = tick(),
+    }
+
+    table.insert(activeShips, ghostShip)
+    return ghostShip
 end
 
 function GhostShipGenerator.GetActiveShips(): {GhostShip}
-	return activeShips
+    return activeShips
+end
+
+function GhostShipGenerator.CullDistantShips(center: Vector3)
+    for i = #activeShips, 1, -1 do
+        local ship = activeShips[i]
+        if ship.Model.PrimaryPart then
+            local dist = (ship.Model.PrimaryPart.Position - center).Magnitude
+            if dist > CONFIG.CullDistance then
+                ship.Model:Destroy()
+                table.remove(activeShips, i)
+            end
+        end
+    end
+end
+
+function GhostShipGenerator.Initialize()
+    globalMaid:GiveTask(RunService.Heartbeat:Connect(function()
+        if #activeShips < CONFIG.MaxShips and math.random() < CONFIG.SpawnChancePerTick then
+            GhostShipGenerator.SpawnGhostShip(1.0 + (#activeShips * 0.12))
+        end
+    end))
+
+    print("[GhostShipGenerator] Initialized with real GhostShipRig from ServerStorage.Assets")
 end
 
 function GhostShipGenerator.Destroy()
-	maid:Cleanup()
-	for _, ship in activeShips do
-		if ship.Model then ship.Model:Destroy() end
-	end
-	table.clear(activeShips)
+    globalMaid:Cleanup()
+    for _, ship in activeShips do
+        if ship.Model then ship.Model:Destroy() end
+    end
+    table.clear(activeShips)
 end
 
 return GhostShipGenerator

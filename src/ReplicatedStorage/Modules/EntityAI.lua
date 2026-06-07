@@ -1,16 +1,15 @@
 --!strict
 -- EntityAI.lua (ReplicatedStorage/Modules)
--- Production server-authoritative corrupted pirate AI for Fog Sea horror.
--- Combines state machine, proper pathfinding, ranged attacks with client visuals, fog culling, and Maid cleanup.
+-- Production server-authoritative corrupted pirate AI for Fog Sea.
+-- Full state machine, pathfinding, LOS checks, and ranged attack visuals.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
 local HorrorEvents = require(script.Parent.HorrorEvents)
 local CollectionService = Utils.GetService("CollectionService")
-local RunService = Utils.GetService("RunService")
 local PathfindingService = Utils.GetService("PathfindingService")
 local Workspace = Utils.GetService("Workspace")
-local Players = Utils.GetService("Players")
+local ServerStorage = Utils.GetService("ServerStorage")
 
 local EntityAI = {}
 EntityAI.__index = EntityAI
@@ -33,7 +32,6 @@ export type Entity = {
 
 local activeEntities: {Entity} = {}
 local globalMaid = Utils.CreateMaid()
-
 local RangedAttackRemote = Utils.CreateRemoteEvent("EntityRangedAttack")
 
 local CONFIG = {
@@ -42,7 +40,6 @@ local CONFIG = {
     AttackCooldown = 1.6,
     MeleeRange = 9,
     RangedRange = 28,
-    ChaseSpeed = 21,
     SanityDrainRadius = 32,
     RangedDamage = 14,
     RangedValidationDelay = 0.4,
@@ -56,13 +53,14 @@ function EntityAI.Create(template: Model, spawnPosition: Vector3): Entity
     model:PivotTo(CFrame.new(spawnPosition))
     model.Parent = Workspace
 
-    local root = model:FindFirstChild("HumanoidRootPart") :: BasePart? or model:FindFirstChildWhichIsA("BasePart")
-    if not root then error("Entity template missing root part") end
+    local root = model:FindFirstChild("HumanoidRootPart") :: BasePart? 
+        or model:FindFirstChildWhichIsA("BasePart")
 
-    -- Critical: Server owns physics to prevent exploits and mobile stuttering
+    if not root then error("Entity template missing root part") end
     root:SetNetworkOwner(nil)
 
-    local humanoid = model:FindFirstChildOfClass("Humanoid") or Instance.new("Humanoid", model)
+    local humanoid = model:FindFirstChildOfClass("Humanoid") 
+        or Instance.new("Humanoid", model)
 
     local entity: Entity = {
         Model = model,
@@ -94,7 +92,7 @@ function EntityAI.Create(template: Model, spawnPosition: Vector3): Entity
     return entity
 end
 
--- ==================== HELPER FUNCTIONS ====================
+-- ==================== HELPERS ====================
 
 local function hasLineOfSight(entity: Entity, targetPos: Vector3): boolean
     if tick() - entity.LastLOSCheck < CONFIG.LOSInterval then
@@ -158,17 +156,14 @@ function EntityAI:PerformAttack(attackType: "Melee" | "Ranged", targetPos: Vecto
             end
         end)
     else
-        -- Melee
         if self.Target and self.Target.Character then
             local hum = self.Target.Character:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum:TakeDamage(22)
-            end
+            if hum then hum:TakeDamage(22) end
         end
     end
 end
 
--- ==================== MAIN UPDATE ====================
+-- ==================== UPDATE ====================
 
 function EntityAI:Update(playerPositions: {[Player]: Vector3}, dt: number)
     if not self.Root or self.Humanoid.Health <= 0 then return end
@@ -194,12 +189,10 @@ function EntityAI:Update(playerPositions: {[Player]: Vector3}, dt: number)
 
     self.Target = closestPlayer
 
-    -- Proximity sanity drain
     if closestDist < CONFIG.SanityDrainRadius then
         HorrorEvents.ApplySanityDrain(closestPlayer, 6 * dt)
     end
 
-    -- State logic
     if closestDist < CONFIG.MeleeRange then
         self.State = "Attacking"
         self:PerformAttack("Melee", closestPos)
@@ -212,13 +205,11 @@ function EntityAI:Update(playerPositions: {[Player]: Vector3}, dt: number)
         self.State = "Idle"
     end
 
-    -- Pathfinding
     if self.State == "Chasing" and now - self.LastPathfind > CONFIG.PathfindInterval then
         self.LastPathfind = now
         self:ComputePath(closestPos)
     end
 
-    -- Move along path
     if self.CurrentPath and #self.CurrentPath > 0 then
         local nextPoint = self.CurrentPath[1]
         self.Humanoid:MoveTo(nextPoint)
@@ -234,21 +225,18 @@ function EntityAI.UpdateAll(playerPositions: {[Player]: Vector3}, dt: number)
     end
 end
 
-function EntityAI.SpawnTestEntity(spawnPos: Vector3): Entity
-    local template = Instance.new("Model")
-    local root = Instance.new("Part")
-    root.Name = "HumanoidRootPart"
-    root.Size = Vector3.new(2, 4, 1)
-    root.Position = spawnPos
-    root.Anchored = false
-    root.CanCollide = true
-    root.Parent = template
-    template.PrimaryPart = root
+-- ==================== SPAWN ====================
 
-    local entity = EntityAI.Create(template, spawnPos)
-    template:Destroy()
+function EntityAI.SpawnTestEntity(spawnPos: Vector3): Entity?
+    local assets = ServerStorage:FindFirstChild("Assets")
+    local template = assets and assets:FindFirstChild("CorruptedPirateRig")
 
-    return entity
+    if not template then
+        warn("[EntityAI] CorruptedPirateRig not found in ServerStorage.Assets")
+        return nil
+    end
+
+    return EntityAI.Create(template, spawnPos)
 end
 
 function EntityAI.Initialize()

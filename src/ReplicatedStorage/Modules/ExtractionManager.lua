@@ -1,10 +1,10 @@
 --!strict
 -- ExtractionManager.lua (ReplicatedStorage/Modules)
--- Production extraction + weight + quota system for Fog Sea.
--- One Piece themed: Players must bring loot to the Cursed Beacon to pay the toll and escape the Florian Triangle.
+-- Production loot + weight + quota system for Fog Sea.
 
 local Utils = require(script.Parent.Utils)
 local GhostShipGenerator = require(script.Parent.GhostShipGenerator)
+local ServerStorage = Utils.GetService("ServerStorage")
 local CollectionService = Utils.GetService("CollectionService")
 local RunService = Utils.GetService("RunService")
 local Players = Utils.GetService("Players")
@@ -32,16 +32,23 @@ local ExtractionSuccessRemote = Utils.CreateRemoteEvent("ExtractionSuccess")
 local CONFIG = {
     MaxChestsPerShip = 4,
     BaseWeight = 15,
-    UpdateRate = 0.33,
     MaxCarryWeight = 80,
     SpeedPenaltyMultiplier = 0.65,
     JumpPenaltyMultiplier = 0.7,
 }
 
 local chestPool: {Model} = {}
-local chestTemplate: Model?
+local chestTemplate: Model? = nil
 
--- ==================== CHEST CREATION & POOLING ====================
+-- ==================== CHEST CREATION ====================
+
+local function getChestTemplate(): Model?
+    if not chestTemplate then
+        local assets = ServerStorage:FindFirstChild("Assets")
+        chestTemplate = assets and assets:FindFirstChild("LootChestRig")
+    end
+    return chestTemplate
+end
 
 local function createChestModel(): Model
     if #chestPool > 0 then
@@ -50,24 +57,22 @@ local function createChestModel(): Model
         return model
     end
 
-    if not chestTemplate then
-        chestTemplate = Instance.new("Model")
-        chestTemplate.Name = "LootChest"
-        local part = Instance.new("Part")
-        part.Name = "Root"
-        part.Size = Vector3.new(4, 3, 6)
-        part.Color = Color3.fromRGB(139, 69, 19)
-        part.Material = Enum.Material.Wood
-        part.Anchored = false
-        part.CanCollide = true
-        part.Parent = chestTemplate
-        chestTemplate.PrimaryPart = part
+    local template = getChestTemplate()
+    if template then
+        return template:Clone()
     end
 
-    local newModel = chestTemplate:Clone()
-    CollectionService:AddTag(newModel, "LootChest")
-    newModel.Parent = workspace
-    return newModel
+    -- Fallback placeholder (should rarely be used)
+    local model = Instance.new("Model")
+    model.Name = "LootChest"
+    local part = Instance.new("Part")
+    part.Name = "Root"
+    part.Size = Vector3.new(4, 3, 6)
+    part.Color = Color3.fromRGB(139, 69, 19)
+    part.Material = Enum.Material.Wood
+    part.Parent = model
+    model.PrimaryPart = part
+    return model
 end
 
 local function returnToPool(model: Model)
@@ -76,8 +81,6 @@ local function returnToPool(model: Model)
         table.insert(chestPool, model)
     end
 end
-
--- ==================== CHEST SPAWNING ====================
 
 local function createLootChest(ship: any): LootChest?
     local shipModel = ship.Model
@@ -113,10 +116,11 @@ local function createLootChest(ship: any): LootChest?
         ExtractionManager.HandlePickup(player, chestModel)
     end))
 
+    CollectionService:AddTag(chestModel, "LootChest")
     return chest
 end
 
--- ==================== PICKUP ====================
+-- ==================== PICKUP & EXTRACTION ====================
 
 function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
     local chest = activeChests[chestModel]
@@ -145,34 +149,27 @@ function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
     activeChests[chestModel] = nil
 end
 
--- ==================== EXTRACTION ZONE (Win Condition) ====================
-
 function ExtractionManager.ExtractAtZone(player: Player, zonePosition: Vector3, radius: number): boolean
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart") :: Part?
     if not root then return false end
 
-    local dist = (root.Position - zonePosition).Magnitude
-    if dist > radius then return false end
+    if (root.Position - zonePosition).Magnitude > radius then return false end
 
     local carried = playerWeight[player] or 0
     if carried <= 0 then return false end
 
-    -- Bank the loot toward quota
-    if typeof(RoundManager) == "table" and typeof(RoundManager.AddExtracted) == "function" then
-        RoundManager.AddExtracted(carried)
+    if _G.RoundManager and typeof(_G.RoundManager.AddExtracted) == "function" then
+        _G.RoundManager.AddExtracted(carried)
     end
 
     playerWeight[player] = 0
-
     ExtractionSuccessRemote:FireClient(player, carried)
     ExtractionManager.ApplyPenalties(player)
 
     print(`[Extraction] {player.Name} successfully extracted {carried} loot!`)
     return true
 end
-
--- ==================== PENALTIES & HELPERS ====================
 
 function ExtractionManager.ApplyPenalties(player: Player)
     local char = player.Character
@@ -187,20 +184,14 @@ function ExtractionManager.ApplyPenalties(player: Player)
     hum.JumpPower = 50 * (1 - ratio * CONFIG.JumpPenaltyMultiplier)
 end
 
-function ExtractionManager.GetPlayerWeight(player: Player): number
-    return playerWeight[player] or 0
-end
-
--- ==================== INITIALIZATION & CLEANUP ====================
+-- ==================== LIFECYCLE ====================
 
 function ExtractionManager.Initialize()
     globalMaid:GiveTask(RunService.Heartbeat:Connect(function()
         local ships = GhostShipGenerator.GetActiveShips()
         for _, ship in ships do
             local count = 0
-            for _, c in activeChests do
-                if c.Ship == ship then count += 1 end
-            end
+            for _, c in activeChests do if c.Ship == ship then count += 1 end end
             if count < CONFIG.MaxChestsPerShip and math.random() < 0.035 then
                 createLootChest(ship)
             end
@@ -211,7 +202,7 @@ function ExtractionManager.Initialize()
         playerWeight[p] = nil
     end))
 
-    print("[ExtractionManager] Initialized with quota-integrated extraction")
+    print("[ExtractionManager] Initialized with real LootChestRig + quota support")
 end
 
 function ExtractionManager.Destroy()

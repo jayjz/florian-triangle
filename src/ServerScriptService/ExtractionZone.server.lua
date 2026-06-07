@@ -1,11 +1,6 @@
 --!strict
 -- ExtractionZone.server.lua (ServerScriptService)
--- Creates and manages the visible Extraction Zone for Fog Sea.
--- One Piece themed: "The Cursed Beacon" — pay the toll to escape the Florian Triangle.
-
-local RunService = game:GetService("RunService")
-local CollectionService = game:GetService("CollectionService")
-local Players = game:GetService("Players")
+-- Creates and manages the visible Extraction Zone (Cursed Beacon).
 
 local EXTRACTION_POSITION = Vector3.new(0, 8, 0)
 local EXTRACTION_RADIUS = 28
@@ -55,40 +50,21 @@ local function setupProximityPrompt()
 
     prompt.Triggered:Connect(function(player: Player)
         if typeof(ExtractionManager.ExtractAtZone) == "function" then
-            local success = ExtractionManager.ExtractAtZone(player, EXTRACTION_POSITION, EXTRACTION_RADIUS)
-            if success then
-                prompt.ActionText = "TOLL PAID — PROGRESS MADE"
-                task.delay(3, function()
-                    if prompt and prompt.Parent then
-                        prompt.ActionText = "Extract Loot (Pay Toll)"
-                    end
-                end)
-            end
+            ExtractionManager.ExtractAtZone(player, EXTRACTION_POSITION, EXTRACTION_RADIUS)
         end
     end)
 end
 
-local function startGlowEffect()
-    local pulse = 1
-    maid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
-        if not zonePart then return end
-        local current = zonePart.Transparency
-        if current <= 0.4 then pulse = -1 elseif current >= 0.8 then pulse = 1 end
-        zonePart.Transparency += pulse * dt * 0.8
-    end))
-end
-
-local maid = Utils.CreateMaid() -- Assume Utils is required if needed, or use local maid
-
 function ExtractionZone.Initialize()
     createExtractionZone()
     setupProximityPrompt()
-    startGlowEffect()
-    print("[ExtractionZone] Fully initialized - One Piece themed extraction goal active")
+    print("[ExtractionZone] Fully initialized")
 end
 
 function ExtractionZone.Destroy()
-    if zonePart then zonePart:Destroy() end
+    if zonePart then
+        zonePart:Destroy()
+    end
 end
 
 return ExtractionZone
