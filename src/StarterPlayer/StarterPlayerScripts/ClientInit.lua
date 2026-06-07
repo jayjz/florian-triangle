@@ -1,19 +1,26 @@
 --!strict
--- ClientInit.lua (StarterPlayerScripts)
-
+-- ClientInit.lua - Updated with guard
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local maid = Utils.CreateMaid()
 
 local ClientInit = {
     Controllers = {
-        UI     = require(script.Parent.Controllers.ClientUIController),
-        Ship   = require(script.Parent.Controllers.ClientShipController),
+        UI = require(script.Parent.Controllers.ClientUIController),
+        Ship = require(script.Parent.Controllers.ClientShipController),
         Combat = require(script.Parent.Controllers.ClientCombatController),
         Horror = require(script.Parent.Controllers.ClientHorrorController),
     }
 }
 
+local initialized = false
+
 function ClientInit.Initialize()
+    if initialized then 
+        warn("[ClientInit] Already initialized — skipping duplicate")
+        return 
+    end
+    initialized = true
+
     print("=== Fog Sea Client Initializing ===")
     for name, ctrl in ClientInit.Controllers do
         if typeof(ctrl.Initialize) == "function" then
@@ -25,6 +32,7 @@ function ClientInit.Initialize()
     end
 end
 
+-- Ensure single call from ClientMain if needed
 ClientInit.Initialize()
 
 return ClientInit
