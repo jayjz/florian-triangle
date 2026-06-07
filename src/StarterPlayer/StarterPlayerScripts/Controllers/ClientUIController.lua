@@ -1,38 +1,38 @@
 --!strict
--- ClientUIController.lua (StarterPlayer/StarterPlayerScripts/Controllers)
--- Client-only UI and tag consumer for LootChest/GhostShip highlights + sanity/weight HUD.
--- All visuals on RenderStepped (throttled, mobile-first). Maid for everything. No server logic.
--- Uses CollectionService signals for server tags. Highlights are dev verification only.
--- Performance: Conditional updates, object pooling for feedback labels, no per-frame allocations.
--- Author: Fog Sea Architect - 2026-06-08
+-- ClientUIController.lua (StarterPlayerScripts/Controllers)
+-- Client-only UI and HUD controller for Fog Sea.
+-- Handles sanity bar, weight HUD, feedback popups, and tag-based visuals.
+-- Pure client visuals. No server logic. Mobile-optimized with throttling and pooling.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
 local TweenService = Utils.GetService("TweenService")
-local ProximityPromptService = Utils.GetService("ProximityPromptService")
 local CollectionService = Utils.GetService("CollectionService")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
+local ClientUIController = {}
+local maid = Utils.CreateMaid()
+
+-- Remotes
 local WeightUpdated = Utils.CreateRemoteEvent("WeightUpdated")
 local PickupEffect = Utils.CreateRemoteEvent("PickupEffect")
 local SanityChanged = Utils.CreateRemoteEvent("SanityChanged")
 
+-- UI Container
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FogSeaHUD"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
-local maid = Utils.CreateMaid()
-
--- UI Elements
+-- Sanity Bar
 local sanityFrame = Instance.new("Frame")
-sanityFrame.Size = UDim2.new(0.35, 0, 0.03, 0)
-sanityFrame.Position = UDim2.new(0.5, 0, 0.03, 0)
+sanityFrame.Size = UDim2.new(0.38, 0, 0.028, 0)
+sanityFrame.Position = UDim2.new(0.5, 0, 0.035, 0)
 sanityFrame.AnchorPoint = Vector2.new(0.5, 0)
-sanityFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+sanityFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 sanityFrame.BorderSizePixel = 0
 sanityFrame.Parent = screenGui
 
@@ -45,172 +45,176 @@ sanityBar.Parent = sanityFrame
 local sanityText = Instance.new("TextLabel")
 sanityText.Size = UDim2.new(1, 0, 1, 0)
 sanityText.BackgroundTransparency = 1
-sanityText.Text = "SANITY: 100%"
-sanityText.TextColor3 = Color3.new(1,1,1)
+sanityText.TextColor3 = Color3.new(1, 1, 1)
 sanityText.Font = Enum.Font.GothamBold
 sanityText.TextScaled = true
 sanityText.Parent = sanityFrame
 
+-- Weight HUD
 local weightFrame = Instance.new("Frame")
-weightFrame.Size = UDim2.new(0.25, 0, 0.1, 0)
-weightFrame.Position = UDim2.new(0.02, 0, 0.85, 0)
-weightFrame.BackgroundColor3 = Color3.fromRGB(10,10,15)
+weightFrame.Size = UDim2.new(0.26, 0, 0.09, 0)
+weightFrame.Position = UDim2.new(0.02, 0, 0.88, 0)
+weightFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
 weightFrame.BorderSizePixel = 2
-weightFrame.BorderColor3 = Color3.fromRGB(100,100,100)
+weightFrame.BorderColor3 = Color3.fromRGB(80, 80, 90)
 weightFrame.Parent = screenGui
 
 local weightText = Instance.new("TextLabel")
-weightText.Size = UDim2.new(1,0,0.5,0)
+weightText.Size = UDim2.new(1, 0, 0.55, 0)
 weightText.BackgroundTransparency = 1
-weightText.Text = "WEIGHT: 0/80kg"
 weightText.TextColor3 = Color3.fromRGB(255, 215, 0)
 weightText.Font = Enum.Font.Gotham
 weightText.TextScaled = true
 weightText.Parent = weightFrame
 
 local weightBar = Instance.new("Frame")
-weightBar.Size = UDim2.new(0,0,0.3,0)
-weightBar.Position = UDim2.new(0.05,0,0.6,0)
+weightBar.Size = UDim2.new(0, 0, 0.32, 0)
+weightBar.Position = UDim2.new(0.05, 0, 0.6, 0)
 weightBar.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
 weightBar.Parent = weightFrame
 
+-- Feedback Pool (floating +X G loot text)
 local feedbackPool: {TextLabel} = {}
 local currentSanity = 100
 local currentWeight = 0
 local MAX_WEIGHT = 80
 
-local function getFeedback(): TextLabel
-	if #feedbackPool > 0 then
-		return table.remove(feedbackPool) :: TextLabel
-	end
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 140, 0, 40)
-	label.BackgroundTransparency = 0.4
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.fromRGB(0, 255, 100)
-	label.Parent = screenGui
-	return label
+local function getFeedbackLabel(): TextLabel
+    if #feedbackPool > 0 then
+        return table.remove(feedbackPool) :: TextLabel
+    end
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 160, 0, 45)
+    label.BackgroundTransparency = 0.3
+    label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.TextColor3 = Color3.fromRGB(0, 255, 120)
+    label.Parent = screenGui
+    return label
 end
 
 local function recycleFeedback(label: TextLabel)
-	label.Parent = nil
-	table.insert(feedbackPool, label)
+    label.Parent = nil
+    table.insert(feedbackPool, label)
 end
 
+-- Tag Handlers with Debounce
+local lastTagTime: {[Model]: number} = {}
+
 local function onLootChestAdded(chest: Model)
-	print("[ClientUIController] LootChest tag consumed for UI feedback")
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "UIHighlight"
-	highlight.FillColor = Color3.fromRGB(0, 255, 120)
-	highlight.OutlineColor = Color3.fromRGB(0, 255, 255)
-	highlight.FillTransparency = 0.7
-	highlight.OutlineTransparency = 0.2
-	highlight.Adornee = chest
-	highlight.Parent = chest
-	maid:GiveTask(highlight)
+    if lastTagTime[chest] and tick() - lastTagTime[chest] < 1.2 then return end
+    lastTagTime[chest] = tick()
+
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.fromRGB(0, 255, 140)
+    highlight.OutlineColor = Color3.fromRGB(100, 255, 200)
+    highlight.FillTransparency = 0.65
+    highlight.OutlineTransparency = 0.15
+    highlight.Adornee = chest
+    highlight.Parent = chest
+    maid:GiveTask(highlight)
 end
 
 local function onGhostShipAdded(ship: Model)
-	print("[ClientUIController] GhostShip tag consumed for UI/ship visuals")
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "UIHighlight"
-	highlight.FillColor = Color3.fromRGB(255, 100, 0)
-	highlight.OutlineColor = Color3.fromRGB(255, 200, 0)
-	highlight.FillTransparency = 0.6
-	highlight.OutlineTransparency = 0.1
-	highlight.Adornee = ship
-	highlight.Parent = ship
-	maid:GiveTask(highlight)
+    if lastTagTime[ship] and tick() - lastTagTime[ship] < 2 then return end
+    lastTagTime[ship] = tick()
+
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.fromRGB(255, 90, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 180, 60)
+    highlight.FillTransparency = 0.6
+    highlight.OutlineTransparency = 0.1
+    highlight.Adornee = ship
+    highlight.Parent = ship
+    maid:GiveTask(highlight)
 end
 
--- Main RenderStepped (mobile performant - only 2 lerps + conditional color)
+-- RenderStepped HUD (throttled, smooth, mobile-friendly)
 maid:GiveTask(RunService.RenderStepped:Connect(function(dt: number)
-	local target = currentSanity / 100
-	sanityBar.Size = UDim2.new(Utils.Lerp(sanityBar.Size.X.Scale, target, 12 * dt), 0, 1, 0)
-	
-	local wRatio = math.clamp(currentWeight / MAX_WEIGHT, 0, 1)
-	weightBar.Size = UDim2.new(wRatio, 0, 0.3, 0)
-	
-	if wRatio > 0.75 then
-		weightBar.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
-		weightText.TextColor3 = Color3.fromRGB(255, 60, 60)
-	elseif wRatio > 0.4 then
-		weightBar.BackgroundColor3 = Color3.fromRGB(255, 160, 40)
-		weightText.TextColor3 = Color3.fromRGB(255, 200, 60)
-	else
-		weightBar.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
-		weightText.TextColor3 = Color3.fromRGB(255, 215, 0)
-	end
-	
-	sanityText.Text = `SANITY: {math.floor(currentSanity)}%`
-	weightText.Text = `WEIGHT: {math.floor(currentWeight)}/{MAX_WEIGHT}kg`
+    local sanityTarget = currentSanity / 100
+    sanityBar.Size = UDim2.new(Utils.Lerp(sanityBar.Size.X.Scale, sanityTarget, 8 * dt), 0, 1, 0)
+
+    local weightRatio = math.clamp(currentWeight / MAX_WEIGHT, 0, 1)
+    weightBar.Size = UDim2.new(weightRatio, 0, 0.32, 0)
+
+    if weightRatio > 0.75 then
+        weightBar.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
+        weightText.TextColor3 = Color3.fromRGB(255, 60, 60)
+    elseif weightRatio > 0.45 then
+        weightBar.BackgroundColor3 = Color3.fromRGB(255, 160, 40)
+        weightText.TextColor3 = Color3.fromRGB(255, 200, 60)
+    else
+        weightBar.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+        weightText.TextColor3 = Color3.fromRGB(255, 215, 0)
+    end
+
+    sanityText.Text = `SANITY: {math.floor(currentSanity)}%`
+    weightText.Text = `WEIGHT: {math.floor(currentWeight)}/{MAX_WEIGHT}kg`
 end))
 
-maid:GiveTask(WeightUpdated.OnClientEvent:Connect(function(w: number, val: number?)
-	currentWeight = w
-	if val then
-		local fb = getFeedback()
-		fb.Text = `+{val}G`
-		fb.Position = UDim2.new(0.5, math.random(-80, 80), 0.4, 0)
-		local tw = TweenService:Create(fb, TweenInfo.new(1.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-			Position = fb.Position + UDim2.new(0, 0, -0.25, 0), 
-			TextTransparency = 1
-		})
-		tw:Play()
-		tw.Completed:Connect(function() recycleFeedback(fb) end)
-	end
-end))
+-- Remote Handlers
+maid:GiveTask(WeightUpdated.OnClientEvent:Connect(function(newWeight: number, valueGained: number?)
+    currentWeight = newWeight
 
-maid:GiveTask(PickupEffect.OnClientEvent:Connect(function(status: string)
-	if status == "OverEncumbered" then
-		weightText.TextColor3 = Color3.new(1, 0, 0)
-	end
+    if valueGained then
+        local fb = getFeedbackLabel()
+        fb.Text = `+{valueGained}G`
+        fb.Position = UDim2.new(0.5, math.random(-90, 90), 0.45, 0)
+
+        local tween = TweenService:Create(fb, TweenInfo.new(1.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+            Position = fb.Position + UDim2.new(0, 0, -0.28, 0),
+            TextTransparency = 1
+        })
+        tween:Play()
+        tween.Completed:Connect(function()
+            recycleFeedback(fb)
+        end)
+    end
 end))
 
 maid:GiveTask(SanityChanged.OnClientEvent:Connect(function(s: number)
-	currentSanity = math.clamp(s, 0, 100)
-	if currentSanity < 30 then
-		sanityBar.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
-	end
+    currentSanity = math.clamp(s, 0, 100)
 end))
 
--- Tag consumers (fixes the orphaned controller issue)
+maid:GiveTask(PickupEffect.OnClientEvent:Connect(function(status: string)
+    if status == "OverEncumbered" then
+        weightText.TextColor3 = Color3.new(1, 0, 0)
+        task.delay(1.2, function()
+            weightText.TextColor3 = Color3.fromRGB(255, 215, 0)
+        end)
+    end
+end))
+
+-- Tag Consumers
 maid:GiveTask(CollectionService:GetInstanceAddedSignal("LootChest"):Connect(onLootChestAdded))
 maid:GiveTask(CollectionService:GetInstanceAddedSignal("GhostShip"):Connect(onGhostShipAdded))
 
 -- Initialize existing tags
 for _, obj in CollectionService:GetTagged("LootChest") do
-	onLootChestAdded(obj)
+    onLootChestAdded(obj)
 end
 for _, obj in CollectionService:GetTagged("GhostShip") do
-	onGhostShipAdded(obj)
+    onGhostShipAdded(obj)
 end
 
--- Prompt enhancements
-maid:GiveTask(ProximityPromptService.PromptShown:Connect(function(prompt)
-	if prompt.ActionText == "Extract Loot" then
-		-- Client visual only
-	end
-end))
-
--- Pool setup
-for i = 1, 8 do
-	table.insert(feedbackPool, getFeedback())
+-- Pre-warm feedback pool
+for _ = 1, 10 do
+    table.insert(feedbackPool, getFeedbackLabel())
 end
 
-print("ClientUIController fully initialized with tag consumers, RenderStepped HUD, pooling, and Maid.")
+function ClientUIController.Initialize()
+    print("[ClientUIController] Fully initialized - HUD and tag consumers active")
+end
 
-local ClientUIController = {
-	Initialize = function() end,
-	Maid = maid
-}
-
-maid:GiveTask(function()
-	screenGui:Destroy()
-	for _, l in feedbackPool do 
-		if l then l:Destroy() end 
-	end
-end)
+function ClientUIController.Destroy()
+    maid:Cleanup()
+    screenGui:Destroy()
+    for _, label in feedbackPool do
+        if label then label:Destroy() end
+    end
+    table.clear(feedbackPool)
+    table.clear(lastTagTime)
+end
 
 return ClientUIController

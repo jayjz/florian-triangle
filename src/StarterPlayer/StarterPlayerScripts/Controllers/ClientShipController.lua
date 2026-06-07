@@ -1,8 +1,8 @@
 --!strict
 -- ClientShipController.lua (StarterPlayerScripts/Controllers)
 -- Consumes CollectionService tags for GhostShip and LootChest.
--- Client-only visuals (Highlights). No server logic.
--- Added debounce to prevent spam.
+-- Client-only visuals (Highlights for verification and atmosphere).
+-- Debounced to prevent spam. Pure visuals — no server logic.
 
 local CollectionService = game:GetService("CollectionService")
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
@@ -10,16 +10,16 @@ local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local ClientShipController = {}
 local maid = Utils.CreateMaid()
 
--- Simple debounce table to stop spam
+-- Debounce to prevent spam on rapid tag additions
 local lastDetection: {[Model]: number} = {}
 
 local function createHighlight(model: Model, fillColor: Color3, outlineColor: Color3)
     local highlight = Instance.new("Highlight")
-    highlight.Name = "ClientVerificationHighlight"
+    highlight.Name = "ClientHighlight"
     highlight.FillColor = fillColor
     highlight.OutlineColor = outlineColor
-    highlight.FillTransparency = 0.6
-    highlight.OutlineTransparency = 0.2
+    highlight.FillTransparency = 0.65
+    highlight.OutlineTransparency = 0.15
     highlight.Adornee = model
     highlight.Parent = model
 
@@ -28,36 +28,37 @@ local function createHighlight(model: Model, fillColor: Color3, outlineColor: Co
 end
 
 local function onGhostShipAdded(ship: Model)
-    if lastDetection[ship] and tick() - lastDetection[ship] < 2 then return end
+    if lastDetection[ship] and tick() - lastDetection[ship] < 1.8 then
+        return
+    end
     lastDetection[ship] = tick()
 
-    print("[ClientShipController] GhostShip detected:", ship:GetFullName())
-    createHighlight(ship, Color3.fromRGB(255, 80, 0), Color3.fromRGB(255, 160, 0))
+    createHighlight(ship, Color3.fromRGB(255, 90, 40), Color3.fromRGB(255, 180, 80))
 end
 
 local function onLootChestAdded(chest: Model)
-    if lastDetection[chest] and tick() - lastDetection[chest] < 1.5 then return end
+    if lastDetection[chest] and tick() - lastDetection[chest] < 1.2 then
+        return
+    end
     lastDetection[chest] = tick()
 
-    print("[ClientShipController] LootChest detected:", chest:GetFullName())
-    createHighlight(chest, Color3.fromRGB(0, 200, 100), Color3.fromRGB(100, 255, 200))
+    createHighlight(chest, Color3.fromRGB(0, 220, 120), Color3.fromRGB(120, 255, 200))
 end
 
 function ClientShipController.Initialize()
-    -- Listen for new tags
+    -- Listen for new tagged instances
     maid:GiveTask(CollectionService:GetInstanceAddedSignal("GhostShip"):Connect(onGhostShipAdded))
     maid:GiveTask(CollectionService:GetInstanceAddedSignal("LootChest"):Connect(onLootChestAdded))
 
-    -- Handle already tagged objects at startup
+    -- Handle any pre-existing tagged objects (e.g. from previous test scenarios)
     for _, obj in ipairs(CollectionService:GetTagged("GhostShip")) do
         onGhostShipAdded(obj)
     end
-
     for _, obj in ipairs(CollectionService:GetTagged("LootChest")) do
         onLootChestAdded(obj)
     end
 
-    print("ClientShipController initialized - Tag consumers active.")
+    print("[ClientShipController] Initialized - Tag consumers active")
 end
 
 function ClientShipController.Destroy()
