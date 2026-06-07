@@ -265,4 +265,8 @@ function EntityAI.SpawnTestEntity(spawnPos: Vector3): Entity
 	return entity
 end
 
+function EntityAI.Initialize()
+    print("[EntityAI] Initialized successfully.")
+end
+
 return EntityAI

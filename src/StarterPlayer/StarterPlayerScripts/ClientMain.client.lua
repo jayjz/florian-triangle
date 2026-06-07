@@ -1,11 +1,13 @@
 --!strict
--- ClientMain.client.lua
--- Rojo entry point for the client (Compiles to a LocalScript in Studio)
--- This file exists solely to bootstrap the modular client framework.
+-- ClientMain.client.lua (StarterPlayerScripts)
+-- Primary client bootstrapper for Fog Sea.
+-- Only responsible for calling ClientInit once.
 
-print(">>> Client Bootstrapper Started <<<")
+local ClientInit = require(script.Parent.ClientInit)
 
--- We use WaitForChild to ensure the ModuleScript has fully replicated to the client before requiring it.
-local ClientInit = require(script.Parent:WaitForChild("ClientInit"))
+print("[ClientMain] Client bootstrapped successfully.")
 
-print(">>> Client Bootstrapper Finished. Client framework is active. <<<")
+-- We call Initialize here so it's only triggered once from the bootstrapper
+if typeof(ClientInit.Initialize) == "function" then
+    ClientInit.Initialize()
+end

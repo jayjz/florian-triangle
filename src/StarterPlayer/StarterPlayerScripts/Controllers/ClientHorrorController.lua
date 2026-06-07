@@ -1,105 +1,104 @@
 --!strict
--- ClientHorrorController.lua (LocalScript)
--- Handles all client-side horror visuals and audio for Fog Sea.
--- Listens to HorrorEvents remotes for sanity changes, whispers, hallucinations.
--- Uses RunService.RenderStepped for smooth sanity-based post-processing (ColorCorrection, DepthOfField).
--- Pooled local sounds via SoundService for whispers/hallucinations. Zero server visual code.
--- Mobile performance: Effect intensity is clamped and updated at reduced rate.
--- Author: Fog Sea Architect - 2026-06-06
+-- ClientHorrorController.lua (StarterPlayerScripts/Controllers)
+-- Client-side horror feedback system for Fog Sea.
+-- Handles dynamic screen effects based on sanity and provides hooks for jumpscares/hallucinations.
+-- All effects are client-only. No server state is modified.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
-local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
 local Lighting = Utils.GetService("Lighting")
-local SoundService = Utils.GetService("SoundService")
 
-local localPlayer = Players.LocalPlayer
-local playerGui = localPlayer:WaitForChild("PlayerGui")
+local ClientHorrorController = {}
+local maid = Utils.CreateMaid()
 
 local Remotes = {
-	SanityChanged = Utils.CreateRemoteEvent("SanityChanged"),
-	WhisperTriggered = Utils.CreateRemoteEvent("WhisperTriggered"),
-	HallucinationTriggered = Utils.CreateRemoteEvent("HallucinationTriggered"),
-	HorrorPulse = Utils.CreateRemoteEvent("HorrorPulse"),
+    SanityChanged = Utils.CreateRemoteEvent("SanityChanged"),
+    HorrorPulse = Utils.CreateRemoteEvent("HorrorPulse"),
+    HallucinationTriggered = Utils.CreateRemoteEvent("HallucinationTriggered"),
 }
 
-local colorCorrection = Instance.new("ColorCorrectionEffect")
-colorCorrection.Parent = Lighting
-local depthOfField = Instance.new("DepthOfFieldEffect")
-depthOfField.FocusDistance = 15
-depthOfField.InFocusRadius = 40
-depthOfField.Parent = Lighting
-
-local soundPool: {Sound} = {}
 local currentSanity = 100
-local lastEffectUpdate = 0
+local colorCorrection: ColorCorrectionEffect?
+local depthOfField: DepthOfFieldEffect?
 
-local CONFIG = {
-	EffectUpdateRate = 0.1, -- Throttled for mobile
-	MaxInsanityEffects = 3,
-	WhisperVolume = 0.65,
-}
+function ClientHorrorController.Initialize()
+    colorCorrection = Instance.new("ColorCorrectionEffect")
+    colorCorrection.Parent = Lighting
 
-local function getPooledSound(): Sound
-	if #soundPool > 0 then
-		return table.remove(soundPool) :: Sound
-	end
-	local s = Instance.new("Sound")
-	s.Parent = SoundService
-	s.Volume = CONFIG.WhisperVolume
-	return s
+    depthOfField = Instance.new("DepthOfFieldEffect")
+    depthOfField.Parent = Lighting
+
+    Remotes.SanityChanged.OnClientEvent:Connect(function(level: number)
+        currentSanity = level
+    end)
+
+    Remotes.HorrorPulse.OnClientEvent:Connect(function(intensity: number)
+        ClientHorrorController:ApplyPulseEffect(intensity)
+    end)
+
+    Remotes.HallucinationTriggered.OnClientEvent:Connect(function(type: number)
+        ClientHorrorController:TriggerHallucination(type)
+    end)
+
+    maid:GiveTask(RunService.RenderStepped:Connect(function()
+        local insanity = (100 - currentSanity) / 100
+
+        if colorCorrection then
+            colorCorrection.Saturation = -0.6 * insanity
+            colorCorrection.Contrast = 0.3 * insanity
+        end
+
+        if depthOfField then
+            depthOfField.FarIntensity = 0.8 * insanity
+        end
+    end))
+
+    print("[ClientHorrorController] Initialized")
 end
 
-local function returnSound(s: Sound)
-	s:Stop()
-	s.Parent = nil
-	table.insert(soundPool, s)
+function ClientHorrorController:ApplyPulseEffect(intensity: number)
+    if not colorCorrection then return end
+
+    local original = colorCorrection.Brightness
+    colorCorrection.Brightness = intensity * 0.4
+
+    task.delay(0.2, function()
+        if colorCorrection then
+            colorCorrection.Brightness = original
+        end
+    end)
 end
 
-Remotes.SanityChanged.OnClientEvent:Connect(function(newSanity: number)
-	currentSanity = newSanity
-end)
+function ClientHorrorController:TriggerHallucination(type: number)
+    -- Placeholder for future hallucination types
+    print(`[ClientHorror] Hallucination triggered: Type {type}`)
+end
 
-Remotes.WhisperTriggered.OnClientEvent:Connect(function(whisperType: string)
-	local sound = getPooledSound()
-	sound.SoundId = if whisperType == "TheyreWatching" then "rbxassetid://9112832456" else "rbxassetid://1848354532"
-	sound:Play()
-	task.delay(5, function() returnSound(sound) end)
-end)
+function ClientHorrorController:TriggerJumpscare(intensity: number)
+    if not colorCorrection then return end
 
-Remotes.HallucinationTriggered.OnClientEvent:Connect(function(hallucinationType: number)
-	-- Visual flash + sound
-	colorCorrection.Brightness = 0.4
-	task.delay(0.3, function() colorCorrection.Brightness = 0 end)
-	
-	local sound = getPooledSound()
-	sound.SoundId = "rbxassetid://9112906594"
-	sound:Play()
-	task.delay(3, function() returnSound(sound) end)
-end)
+    local original = colorCorrection.Brightness
+    colorCorrection.Brightness = intensity * 0.8
 
-Remotes.HorrorPulse.OnClientEvent:Connect(function(intensity: number)
-	depthOfField.FocusDistance = 8 + intensity * 12
-	task.delay(1.5, function() depthOfField.FocusDistance = 15 end)
-end)
+    task.delay(0.15, function()
+        if colorCorrection then
+            colorCorrection.Brightness = original
+        end
+    end)
+end
 
--- Smooth sanity-based post processing on RenderStepped
-local renderConnection = RunService.RenderStepped:Connect(function(_dt: number)
-	local now = tick()
-	if now - lastEffectUpdate < CONFIG.EffectUpdateRate then return end
-	lastEffectUpdate = now
-	
-	local insanity = (100 - currentSanity) / 100
-	colorCorrection.Saturation = -0.6 * insanity
-	colorCorrection.Contrast = 0.3 * insanity
-	depthOfField.FarIntensity = 0.7 * insanity
-end)
+function ClientHorrorController.Destroy()
+    maid:Cleanup()
 
-print("ClientHorrorController initialized - Full client horror visuals and audio active")
+    if colorCorrection then
+        colorCorrection:Destroy()
+        colorCorrection = nil
+    end
 
--- Cleanup on destroy
-localPlayer.CharacterRemoving:Connect(function()
-	if renderConnection then renderConnection:Disconnect() end
-	colorCorrection:Destroy()
-	depthOfField:Destroy()
-end)
+    if depthOfField then
+        depthOfField:Destroy()
+        depthOfField = nil
+    end
+end
+
+return ClientHorrorController

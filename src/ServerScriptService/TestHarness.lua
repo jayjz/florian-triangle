@@ -1,10 +1,13 @@
 --!strict
 -- TestHarness.lua (ServerScriptService)
+-- Refactored & Hardened for reliable Studio testing.
+-- Features: DRY spawning helpers, proper Maid cleanup, defensive guards, chat + _G command bar support.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local GhostShipGenerator = require(game.ReplicatedStorage.Modules.GhostShipGenerator)
 local ExtractionManager = require(game.ReplicatedStorage.Modules.ExtractionManager)
 local EntityAI = require(game.ReplicatedStorage.Modules.EntityAI)
+
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
 local CollectionService = Utils.GetService("CollectionService")
@@ -13,84 +16,128 @@ local TestHarness = {}
 TestHarness.__index = TestHarness
 
 export type DebugCommand = "spawnTestShip" | "spawnEntities" | "spawnChests" | "setDifficulty" | "fullTestScenario"
-export type TestHarness = typeof(TestHarness)
 
 local testMaid = Utils.CreateMaid()
 local AdminDebugRemote = Utils.CreateRemoteEvent("AdminDebugCommand")
-
 local currentDifficulty = 1
 
+-- ============================================================
+-- INTERNAL SPAWNING HELPERS (DRY + Defensive)
+-- ============================================================
+
+local function tag(model: Model?, tagName: string)
+    if model then
+        CollectionService:AddTag(model, tagName)
+    end
+end
+
+local function spawnShip(pos: Vector3): Model?
+    local shipData = GhostShipGenerator.CreateTestShip(pos)
+    if not shipData or not shipData.Model then
+        warn("[TestHarness] Failed to create test ship")
+        return nil
+    end
+
+    tag(shipData.Model, "GhostShip")
+    testMaid:GiveTask(shipData.Model) -- Track for cleanup
+    return shipData.Model
+end
+
+local function spawnChest(shipModel: Model?)
+    if not shipModel then return end
+
+    local chestData = ExtractionManager.CreateTestChest(shipModel)
+    if chestData and chestData.Model then
+        tag(chestData.Model, "LootChest")
+        testMaid:GiveTask(chestData.Model)
+    end
+end
+
+local function spawnEnemy(pos: Vector3)
+    local entity = EntityAI.SpawnTestEntity(pos)
+    if not entity or not entity.Model then
+        warn("[TestHarness] Failed to create test entity")
+        return
+    end
+
+    tag(entity.Model, "CorruptedPirate")
+    if entity.Root then
+        entity.Root:SetNetworkOwner(nil)
+    end
+    testMaid:GiveTask(entity.Model)
+end
+
+-- ============================================================
+-- ADMIN & COMMAND HANDLING
+-- ============================================================
+
 local function isAdmin(player: Player): boolean
-    return RunService:IsStudio() or player.UserId == 0 
+    return RunService:IsStudio() or player.UserId == 0
 end
 
 local function executeDebugCommand(player: Player, command: DebugCommand, param: number?)
     if not isAdmin(player) then return end
-    
+
     local center = Vector3.new(0, 50, 0)
     local char = player.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         center = (char.HumanoidRootPart :: Part).Position + Vector3.new(0, 30, 50)
     end
-    
+
     if command == "fullTestScenario" then
-        local ship = GhostShipGenerator.CreateTestShip(center)
-        CollectionService:AddTag(ship.Model, "GhostShip")
-        
-        for i = 1, 3 do
-            local chest = ExtractionManager.CreateTestChest(ship)
-            CollectionService:AddTag(chest.Model, "LootChest")
-        end
-        
-        for i = 1, 2 do
-            local e = EntityAI.SpawnTestEntity(center + Vector3.new(i*12, 0, 0))
-            CollectionService:AddTag(e.Model, "CorruptedPirate")
-            if e.Root then e.Root:SetNetworkOwner(nil) end
-            testMaid:GiveTask(e.Model)
+        local shipModel = spawnShip(center)
+        if shipModel then
+            for _ = 1, 3 do
+                spawnChest(shipModel)
+            end
+            for i = 1, 2 do
+                spawnEnemy(center + Vector3.new(i * 12, 0, 0))
+            end
         end
         currentDifficulty = param or 2
-        print(`Full testable round spawned by {player.Name} at difficulty {currentDifficulty}`)
-        
+        print(`[TestHarness] Full scenario spawned at difficulty {currentDifficulty}`)
+
     elseif command == "spawnTestShip" then
-        local ship = GhostShipGenerator.CreateTestShip(center)
-        CollectionService:AddTag(ship.Model, "GhostShip")
-        for i = 1, 3 do
-            local chest = ExtractionManager.CreateTestChest(ship)
-            CollectionService:AddTag(chest.Model, "LootChest")
+        local shipModel = spawnShip(center)
+        if shipModel then
+            for _ = 1, 3 do
+                spawnChest(shipModel)
+            end
         end
-        print(`Test ship spawned by {player.Name}`)
-        
+        print("[TestHarness] Test ship + chests spawned")
+
     elseif command == "spawnEntities" then
         local count = math.clamp(param or 3, 1, 8)
         for i = 1, count do
-            local e = EntityAI.SpawnTestEntity(center + Vector3.new(i*8, 0, 0))
-            CollectionService:AddTag(e.Model, "CorruptedPirate")
-            if e.Root then e.Root:SetNetworkOwner(nil) end
-            testMaid:GiveTask(e.Model)
+            spawnEnemy(center + Vector3.new(i * 8, 0, 0))
         end
-        print(`Spawned {count} test entities`)
-        
+        print(`[TestHarness] Spawned {count} test entities`)
+
     elseif command == "spawnChests" then
         local count = math.clamp(param or 3, 1, 6)
-        local ship = GhostShipGenerator.CreateTestShip(center)
-        CollectionService:AddTag(ship.Model, "GhostShip")
-        for i = 1, count do
-            local chest = ExtractionManager.CreateTestChest(ship)
-            CollectionService:AddTag(chest.Model, "LootChest")
+        local shipModel = spawnShip(center)
+        if shipModel then
+            for _ = 1, count do
+                spawnChest(shipModel)
+            end
         end
-        print(`Spawned {count} test chests`)
-        
+        print(`[TestHarness] Spawned {count} chests on test ship`)
+
     elseif command == "setDifficulty" then
         currentDifficulty = math.clamp(param or 1, 1, 5)
-        print(`Difficulty set to {currentDifficulty}`)
+        print(`[TestHarness] Difficulty set to {currentDifficulty}`)
     end
 end
+
+-- ============================================================
+-- INITIALIZATION
+-- ============================================================
 
 function TestHarness.Initialize()
     AdminDebugRemote.OnServerEvent:Connect(function(player: Player, command: DebugCommand, param: number?)
         executeDebugCommand(player, command, param)
     end)
-    
+
     Players.PlayerAdded:Connect(function(player: Player)
         if isAdmin(player) then
             player.Chatted:Connect(function(msg: string)
@@ -105,22 +152,25 @@ function TestHarness.Initialize()
             end)
         end
     end)
-    
-    print("TestHarness initialized. Chat commands and Command Bar hooks are ready.")
+
+    print("[TestHarness] Initialized. Use /debug full or _G.ForceTestScenario() in Command Bar.")
 end
 
 function TestHarness.Destroy()
     testMaid:Cleanup()
 end
 
--- Expose to _G for bulletproof Studio Command Bar testing
+-- ============================================================
+-- GLOBAL COMMAND BAR HOOK
+-- ============================================================
+
 _G.ForceTestScenario = function(playerId: number?)
     local target = playerId and Players:GetPlayerByUserId(playerId) or Players:GetPlayers()[1]
     if target then
-        print(`[TestHarness] Forcing fullTestScenario for {target.Name} via Command Bar...`)
+        print(`[TestHarness] Forcing fullTestScenario via Command Bar for {target.Name}`)
         executeDebugCommand(target, "fullTestScenario", 3)
     else
-        warn("[TestHarness] No players found to execute the test scenario.")
+        warn("[TestHarness] No players available to run test scenario.")
     end
 end
 

@@ -1,47 +1,30 @@
 --!strict
--- ClientInit.lua (StarterPlayer/StarterPlayerScripts)
--- Central client initializer for Fog Sea. Loads all Controllers in safe order with pcall protection.
--- Now includes ClientShipController for tag consumers (GhostShip/LootChest highlights).
--- Uses Maid for global cleanup. Ensures controllers are ready before game start (mobile race condition mitigation).
--- No loops or visuals here — defers to individual Controllers (ClientUIController uses RenderStepped, Ship uses signals).
--- All remotes created via Utils.CreateRemoteEvent in respective modules. Server state never touched from client.
--- Performance: One-time execution only. 
--- Author: Fog Sea Architect - 2026-06-08
+-- ClientInit.lua (StarterPlayerScripts)
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local maid = Utils.CreateMaid()
 
-local Controllers = {
-    UI = require(script.Parent.Controllers.ClientUIController),
-    Ship = require(script.Parent.Controllers.ClientShipController),
-    Combat = require(script.Parent.Controllers.ClientCombatController),
-    Horror = require(script.Parent.Controllers.ClientHorrorController),
-} :: {[string]: {Initialize: (() -> ())?, Maid: any?}}
+local ClientInit = {
+    Controllers = {
+        UI     = require(script.Parent.Controllers.ClientUIController),
+        Ship   = require(script.Parent.Controllers.ClientShipController),
+        Combat = require(script.Parent.Controllers.ClientCombatController),
+        Horror = require(script.Parent.Controllers.ClientHorrorController),
+    }
+}
 
-local function init()
-	print("=== Fog Sea Client Initializing (Phase 7 fixed - all tag consumers wired) ===")
-	for name, ctrl in Controllers do
-		print(`Initializing {name}Controller...`)
-		if typeof(ctrl.Initialize) == "function" then
-			local ok, err = pcall(ctrl.Initialize)
-			if not ok then warn(`Controller {name} init failed: {err}`) end
-		else
-			print(`{name}Controller self-initialized on require`)
-		end
-	end
-	print("Client fully initialized. Ship tags, Extraction UI, horror, combat systems active.")
+function ClientInit.Initialize()
+    print("=== Fog Sea Client Initializing ===")
+    for name, ctrl in ClientInit.Controllers do
+        if typeof(ctrl.Initialize) == "function" then
+            local ok, err = pcall(ctrl.Initialize)
+            if not ok then
+                warn(`[ClientInit] {name} failed: {err}`)
+            end
+        end
+    end
 end
 
-init()
+ClientInit.Initialize()
 
-maid:GiveTask(function()
-	print("Client shutdown - cleaning controllers")
-	for _, ctrl in Controllers do
-		if ctrl.Maid and typeof(ctrl.Maid.Cleanup) == "function" then
-			pcall(ctrl.Maid.Cleanup)
-		end
-	end
-	maid:Cleanup()
-end)
-
-return {Controllers = Controllers, Maid = maid}
+return ClientInit
