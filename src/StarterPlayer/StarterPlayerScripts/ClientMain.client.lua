@@ -22,3 +22,5 @@ if success then
 else
 	warn(`[ClientMain] Bootstrap failed: {err}`)
 end
+if _G.ClientAlreadyInitialized then return end
+_G.ClientAlreadyInitialized = true
