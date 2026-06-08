@@ -1,69 +1,71 @@
 --!strict
 -- ClientShipController.lua (StarterPlayerScripts/Controllers)
--- Consumes CollectionService tags for GhostShip and LootChest.
--- Client-only visuals (Highlights for verification and atmosphere).
--- Debounced to prevent spam. Pure visuals — no server logic.
+-- Ship movement input + boarding visuals for ghost ship interiors.
 
-local CollectionService = game:GetService("CollectionService")
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
+local CollectionService = Utils.GetService("CollectionService")
+local RunService = Utils.GetService("RunService")
+local UserInputService = Utils.GetService("UserInputService")
+
+local Remotes = {
+	PlayerMoveInput = Utils.CreateRemoteEvent("PlayerMoveInput"),
+	PlayerDocked = Utils.CreateRemoteEvent("PlayerDocked"),
+}
 
 local ClientShipController = {}
 local maid = Utils.CreateMaid()
 
--- Debounce to prevent spam on rapid tag additions
 local lastDetection: {[Model]: number} = {}
 
 local function createHighlight(model: Model, fillColor: Color3, outlineColor: Color3)
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ClientHighlight"
-    highlight.FillColor = fillColor
-    highlight.OutlineColor = outlineColor
-    highlight.FillTransparency = 0.65
-    highlight.OutlineTransparency = 0.15
-    highlight.Adornee = model
-    highlight.Parent = model
-
-    maid:GiveTask(highlight)
-    return highlight
+	local highlight = Instance.new("Highlight")
+	highlight.FillColor = fillColor
+	highlight.OutlineColor = outlineColor
+	highlight.FillTransparency = 0.65
+	highlight.OutlineTransparency = 0.15
+	highlight.Adornee = model
+	highlight.Parent = model
+	maid:GiveTask(highlight)
 end
 
 local function onGhostShipAdded(ship: Model)
-    if lastDetection[ship] and tick() - lastDetection[ship] < 1.8 then
-        return
-    end
-    lastDetection[ship] = tick()
-
-    createHighlight(ship, Color3.fromRGB(255, 90, 40), Color3.fromRGB(255, 180, 80))
-end
-
-local function onLootChestAdded(chest: Model)
-    if lastDetection[chest] and tick() - lastDetection[chest] < 1.2 then
-        return
-    end
-    lastDetection[chest] = tick()
-
-    createHighlight(chest, Color3.fromRGB(0, 220, 120), Color3.fromRGB(120, 255, 200))
+	if lastDetection[ship] and tick() - lastDetection[ship] < 1.8 then return end
+	lastDetection[ship] = tick()
+	createHighlight(ship, Color3.fromRGB(255, 90, 40), Color3.fromRGB(255, 180, 80))
 end
 
 function ClientShipController.Initialize()
-    -- Listen for new tagged instances
-    maid:GiveTask(CollectionService:GetInstanceAddedSignal("GhostShip"):Connect(onGhostShipAdded))
-    maid:GiveTask(CollectionService:GetInstanceAddedSignal("LootChest"):Connect(onLootChestAdded))
+	maid:GiveTask(CollectionService:GetInstanceAddedSignal("GhostShip"):Connect(onGhostShipAdded))
 
-    -- Handle any pre-existing tagged objects (e.g. from previous test scenarios)
-    for _, obj in ipairs(CollectionService:GetTagged("GhostShip")) do
-        onGhostShipAdded(obj)
-    end
-    for _, obj in ipairs(CollectionService:GetTagged("LootChest")) do
-        onLootChestAdded(obj)
-    end
+	for _, obj in CollectionService:GetTagged("GhostShip") do
+		onGhostShipAdded(obj)
+	end
 
-    print("[ClientShipController] Initialized - Tag consumers active")
+	-- Movement input
+	maid:GiveTask(RunService.RenderStepped:Connect(function()
+		local moveDir = Vector3.new(0, 0, 0)
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += Vector3.new(0, 0, -1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir += Vector3.new(0, 0, 1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir += Vector3.new(-1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += Vector3.new(1, 0, 0) end
+
+		if moveDir.Magnitude > 0 then
+			Remotes.PlayerMoveInput:FireServer(moveDir.Unit)
+		end
+	end))
+
+	-- Docking feedback
+	maid:GiveTask(Remotes.PlayerDocked.OnClientEvent:Connect(function(shipModel: Model)
+		print("[ClientShipController] Boarded ghost ship interior - horror intensified")
+		-- TODO: Camera shake + interior lighting change
+	end))
+
+	print("[ClientShipController] Initialized - Ship interiors boarding active")
 end
 
 function ClientShipController.Destroy()
-    maid:Cleanup()
-    table.clear(lastDetection)
+	maid:Cleanup()
+	table.clear(lastDetection)
 end
 
 return ClientShipController

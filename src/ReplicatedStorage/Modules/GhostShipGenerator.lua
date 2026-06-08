@@ -1,110 +1,99 @@
 --!strict
 -- GhostShipGenerator.lua (ReplicatedStorage/Modules)
--- Production server-authoritative ghost ship spawner for Fog Sea.
--- Uses real GhostShipRig from ServerStorage.Assets. Mobile-optimized with network ownership.
+-- Procedural ghost ship spawning with rich interiors for horror and loot.
 
 local Utils = require(script.Parent.Utils)
 local CollectionService = Utils.GetService("CollectionService")
-local RunService = Utils.GetService("RunService")
-local ServerStorage = Utils.GetService("ServerStorage")
 
 local GhostShipGenerator = {}
 GhostShipGenerator.__index = GhostShipGenerator
 
-export type GhostShip = {
-    Model: Model,
-    Difficulty: number,
-    LastSpawnTime: number,
-}
-
-local activeShips: {GhostShip} = {}
+local activeShips: {Model} = {}
 local globalMaid = Utils.CreateMaid()
 
 local CONFIG = {
-    MaxShips = 5,
-    SpawnDistance = 180,
-    CullDistance = 420,
-    SpawnChancePerTick = 0.035, -- ~every 28 seconds on average
+	MaxShips = 8,
+	SpawnRadius = 350,
 }
 
-local ghostShipTemplate: Model? = nil
+local function createInterior(shipModel: Model)
+	local interior = Instance.new("Model")
+	interior.Name = "Interior"
 
-local function getGhostShipTemplate(): Model?
-    if not ghostShipTemplate then
-        local assets = ServerStorage:FindFirstChild("Assets")
-        ghostShipTemplate = assets and assets:FindFirstChild("GhostShipRig")
+	-- Floor
+	local floor = Instance.new("Part")
+	floor.Size = Vector3.new(45, 2, 65)
+	floor.Position = shipModel.PrimaryPart.Position + Vector3.new(0, 5, 0)
+	floor.Anchored = true
+	floor.Material = Enum.Material.Wood
+	floor.Parent = interior
 
-        if not ghostShipTemplate then
-            warn("[GhostShipGenerator] GhostShipRig not found in ServerStorage.Assets — using fallback")
-        end
-    end
-    return ghostShipTemplate
+	-- Loot chests
+	for i = 1, 5 do
+		local chest = Instance.new("Model")
+		chest.Name = "LootChest"
+		local part = Instance.new("Part")
+		part.Size = Vector3.new(4, 3, 6)
+		part.Position = floor.Position + Vector3.new(math.random(-18, 18), 6, math.random(-25, 25))
+		part.Parent = chest
+		chest.PrimaryPart = part
+		chest.Parent = interior
+		CollectionService:AddTag(chest, "LootChest")
+	end
+
+	-- Horror props
+	local prop = Instance.new("Part")
+	prop.Transparency = 0.7
+	prop.Color = Color3.fromRGB(40, 40, 50)
+	prop.Size = Vector3.new(8, 12, 8)
+	prop.Position = floor.Position + Vector3.new(0, 12, 0)
+	prop.Parent = interior
+	CollectionService:AddTag(prop, "HorrorProp")
+
+	interior.Parent = shipModel
 end
 
-function GhostShipGenerator.SpawnGhostShip(difficulty: number?): GhostShip?
-    local template = getGhostShipTemplate()
-    if not template then return nil end
+function GhostShipGenerator.CreateTestShip(pos: Vector3): {Model: Model}
+	local ship = Instance.new("Model")
+	ship.Name = "GhostShip"
 
-    local ship = template:Clone()
-    ship:PivotTo(CFrame.new(
-        math.random(-CONFIG.SpawnDistance, CONFIG.SpawnDistance),
-        18,
-        math.random(-CONFIG.SpawnDistance, CONFIG.SpawnDistance)
-    ))
-    ship.Parent = workspace
+	local hull = Instance.new("Part")
+	hull.Size = Vector3.new(55, 15, 130)
+	hull.Position = pos
+	hull.Color = Color3.fromRGB(70, 70, 85)
+	hull.Material = Enum.Material.Wood
+	hull.Anchored = false
+	hull.Parent = ship
+	ship.PrimaryPart = hull
 
-    CollectionService:AddTag(ship, "GhostShip")
+	CollectionService:AddTag(ship, "GhostShip")
 
-    -- Critical for mobile: Server owns all physics
-    for _, descendant in ship:GetDescendants() do
-        if descendant:IsA("BasePart") then
-            descendant:SetNetworkOwner(nil)
-        end
-    end
+	createInterior(ship)
 
-    local ghostShip: GhostShip = {
-        Model = ship,
-        Difficulty = difficulty or 1.0,
-        LastSpawnTime = tick(),
-    }
-
-    table.insert(activeShips, ghostShip)
-    return ghostShip
-end
-
-function GhostShipGenerator.GetActiveShips(): {GhostShip}
-    return activeShips
+	table.insert(activeShips, ship)
+	return {Model = ship}
 end
 
 function GhostShipGenerator.CullDistantShips(center: Vector3)
-    for i = #activeShips, 1, -1 do
-        local ship = activeShips[i]
-        if ship.Model.PrimaryPart then
-            local dist = (ship.Model.PrimaryPart.Position - center).Magnitude
-            if dist > CONFIG.CullDistance then
-                ship.Model:Destroy()
-                table.remove(activeShips, i)
-            end
-        end
-    end
+	for i = #activeShips, 1, -1 do
+		local ship = activeShips[i]
+		if ship.PrimaryPart and (ship.PrimaryPart.Position - center).Magnitude > 700 then
+			ship:Destroy()
+			table.remove(activeShips, i)
+		end
+	end
 end
 
 function GhostShipGenerator.Initialize()
-    globalMaid:GiveTask(RunService.Heartbeat:Connect(function()
-        if #activeShips < CONFIG.MaxShips and math.random() < CONFIG.SpawnChancePerTick then
-            GhostShipGenerator.SpawnGhostShip(1.0 + (#activeShips * 0.12))
-        end
-    end))
-
-    print("[GhostShipGenerator] Initialized with real GhostShipRig from ServerStorage.Assets")
+	print("[GhostShipGenerator] Initialized with rich procedural interiors")
 end
 
 function GhostShipGenerator.Destroy()
-    globalMaid:Cleanup()
-    for _, ship in activeShips do
-        if ship.Model then ship.Model:Destroy() end
-    end
-    table.clear(activeShips)
+	globalMaid:Cleanup()
+	for _, ship in activeShips do
+		if ship then ship:Destroy() end
+	end
+	table.clear(activeShips)
 end
 
 return GhostShipGenerator

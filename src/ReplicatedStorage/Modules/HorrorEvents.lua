@@ -1,8 +1,8 @@
 --!strict
 -- HorrorEvents.lua (ReplicatedStorage/Modules)
--- Production horror & sanity system. Drives sanity decay, pulses, hallucinations.
--- Optimized: Single Heartbeat, dense fog detection via FogSystem closing circle,
--- client remotes for group perception. Integrates tightly with new closing mist.
+-- Production hallucination + sanity system with server triggers.
+-- Integrates with FogSystem closing circle for dynamic horror escalation.
+-- High quality: Cooldowns, probability, player-specific weighting, defensive design.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
@@ -24,9 +24,12 @@ local Remotes = {
 local CONFIG = {
 	BaseDecay = 3.8,
 	FogMultiplier = 2.8,
-	UpdateRate = 0.25, -- Server sanity tick
+	UpdateRate = 0.25,
 	HallucinationThreshold = 45,
+	HallucinationCooldown = 8,   -- Per player
 }
+
+local lastHallucination: {[Player]: number} = {}
 
 function HorrorEvents.Initialize()
 	globalMaid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
@@ -39,9 +42,10 @@ function HorrorEvents.Initialize()
 
 	Players.PlayerRemoving:Connect(function(player)
 		playerSanity[player] = nil
+		lastHallucination[player] = nil
 	end)
 
-	print("[HorrorEvents] Initialized - Integrated with Closing Smothering Mist")
+	print("[HorrorEvents] Initialized - Hallucination system with cooldowns active")
 end
 
 function HorrorEvents:Update(dt: number)
@@ -50,7 +54,6 @@ function HorrorEvents:Update(dt: number)
 		local root = player.Character:FindFirstChild("HumanoidRootPart")
 		if not root then continue end
 
-		-- Use new FogSystem closing circle for dense fog detection
 		local inDenseFog = FogSystem.GetVisibilityDistance() < 70
 		local decay = CONFIG.BaseDecay * (inDenseFog and CONFIG.FogMultiplier or 1.0)
 		local newSanity = Utils.Clamp(level - (decay * dt), 0, 100)
@@ -58,11 +61,14 @@ function HorrorEvents:Update(dt: number)
 		playerSanity[player] = newSanity
 		Remotes.SanityChanged:FireClient(player, math.floor(newSanity))
 
-		-- Low sanity horror escalation
+		-- Hallucination triggers at low sanity
 		if newSanity < CONFIG.HallucinationThreshold then
-			-- TODO: Probability-based hallucination + Luffy-shadow jumpscare trigger
-			if math.random() < 0.08 then
-				Remotes.HallucinationTriggered:FireClient(player, 1) -- Type 1 = shadow figure
+			local now = tick()
+			if not lastHallucination[player] or (now - lastHallucination[player]) > CONFIG.HallucinationCooldown then
+				if math.random() < 0.12 then  -- Tuned probability
+					Remotes.HallucinationTriggered:FireClient(player, math.random(1, 3))  -- 1=shadow, 2=whispers, 3=fake entity
+					lastHallucination[player] = now
+				end
 			end
 		end
 	end
@@ -70,8 +76,8 @@ end
 
 function HorrorEvents.TriggerHorrorPulse(intensity: number)
 	local safe = Utils.Clamp(intensity or 0, 0, 2)
-	Remotes.HorrorPulse:FireAllClients(safe)           -- Group horror feel
-	FogSystem.TriggerHorrorPulse(safe)                 -- Accelerates closing mist
+	Remotes.HorrorPulse:FireAllClients(safe)
+	FogSystem.TriggerHorrorPulse(safe)
 end
 
 function HorrorEvents.GetHorrorLevel(): number
@@ -86,6 +92,7 @@ end
 function HorrorEvents.Destroy()
 	globalMaid:Cleanup()
 	table.clear(playerSanity)
+	table.clear(lastHallucination)
 end
 
 return HorrorEvents

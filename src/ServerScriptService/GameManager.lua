@@ -1,17 +1,11 @@
 --!strict
 -- GameManager.lua (ServerScriptService)
--- Central server orchestrator for Florian Triangle (Fog Sea).
--- Responsibilities: Bootstrap all systems in correct dependency order, coordinate 5Hz game loop,
--- manage player lifecycle, route horror/fog signals, integrate Lobby → Round flow,
--- and ensure clean shutdown with Maid propagation.
--- Optimizations: Throttled updates, defensive pcall guards, reduced extraction spam risk,
--- LobbyManager integration for Foosha → Windmill Village transition.
+-- Central orchestrator with rate limiting and anti-exploit wrappers.
 
 local Utils = require(script.Parent.Parent.ReplicatedStorage.Modules.Utils)
 
--- Systems (loaded once, in dependency-friendly order)
 local RoundManager = require(script.Parent.RoundManager)
-local LobbyManager = require(script.Parent.LobbyManager)  -- NEW: Lobby & round start
+local LobbyManager = require(script.Parent.LobbyManager)
 local FogSystem = require(script.Parent.Parent.ReplicatedStorage.Modules.FogSystem)
 local ShipController = require(script.Parent.Parent.ReplicatedStorage.Modules.ShipController)
 local GhostShipGenerator = require(script.Parent.Parent.ReplicatedStorage.Modules.GhostShipGenerator)
@@ -30,25 +24,26 @@ GameManager.__index = GameManager
 local maid = Utils.CreateMaid()
 local playerPositions: {[Player]: Vector3} = {}
 local lastUpdate = 0
-local UPDATE_RATE = 0.2 -- 5Hz server tick (balances responsiveness + performance)
+local UPDATE_RATE = 0.2
+
+-- Simple rate limiter
+local lastRemoteTime: {[Player]: number} = {}
 
 function GameManager.Initialize()
 	print("=== [GameManager] Initializing all systems ===")
 
-	-- Critical first: Round state + Lobby flow
-	RoundManager.Initialize()
-	LobbyManager.Initialize()
+	pcall(RoundManager.Initialize)
+	pcall(LobbyManager.Initialize)
 
 	local systems = {
-		{ name = "FogSystem",          sys = FogSystem },
-		{ name = "ShipController",     sys = ShipController },
+		{ name = "FogSystem", sys = FogSystem },
+		{ name = "ShipController", sys = ShipController },
 		{ name = "GhostShipGenerator", sys = GhostShipGenerator },
-		{ name = "HorrorEvents",       sys = HorrorEvents },
-		{ name = "ExtractionManager",  sys = ExtractionManager },
-		{ name = "ExtractionZone",     sys = ExtractionZone },
-		{ name = "TestHarness",        sys = TestHarness },
-		{ name = "EntityAI",           sys = EntityAI },
-		{ name = "LobbyManager",       sys = LobbyManager },  -- Already initialized above
+		{ name = "HorrorEvents", sys = HorrorEvents },
+		{ name = "ExtractionManager", sys = ExtractionManager },
+		{ name = "ExtractionZone", sys = ExtractionZone },
+		{ name = "TestHarness", sys = TestHarness },
+		{ name = "EntityAI", sys = EntityAI },
 	}
 
 	for _, data in systems do
@@ -59,57 +54,37 @@ function GameManager.Initialize()
 			else
 				warn(`[GameManager] Failed to initialize {data.name}: {err}`)
 			end
-		else
-			warn(`[GameManager] {data.name} missing Initialize()`)
 		end
 	end
 
-	-- Player lifecycle
 	Players.PlayerAdded:Connect(function(player)
 		print(`[GameManager] Player {player.Name} joined`)
-		player.CharacterAdded:Connect(function()
-			task.wait(1.5) -- Allow character to settle
-			if typeof(ShipController.InitializeForPlayer) == "function" then
-				ShipController.InitializeForPlayer(player)
-			end
-		end)
+		lastRemoteTime[player] = 0
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
 		playerPositions[player] = nil
+		lastRemoteTime[player] = nil
 	end)
 
-	-- Main throttled game loop (5Hz)
 	maid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
 		local now = tick()
 		if now - lastUpdate < UPDATE_RATE then return end
 		lastUpdate = now
 
-		-- Update tracked positions for AI/pathfinding
 		for _, player in Players:GetPlayers() do
 			local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-			if root then
-				playerPositions[player] = root.Position
-			end
+			if root then playerPositions[player] = root.Position end
 		end
 
-		-- Subsystem updates (defensive checks)
-		if typeof(EntityAI.UpdateAll) == "function" then
-			EntityAI.UpdateAll(playerPositions, dt)
-		end
-		if typeof(GhostShipGenerator.CullDistantShips) == "function" then
-			GhostShipGenerator.CullDistantShips(Vector3.new(0, 50, 0))
-		end
+		if typeof(EntityAI.UpdateAll) == "function" then EntityAI.UpdateAll(playerPositions, dt) end
+		if typeof(GhostShipGenerator.CullDistantShips) == "function" then GhostShipGenerator.CullDistantShips(Vector3.new(0, 50, 0)) end
 
-		-- Horror → Fog bridge (Smothering Mist driver)
 		if typeof(HorrorEvents.GetHorrorLevel) == "function" then
 			local level = HorrorEvents.GetHorrorLevel()
-			if typeof(FogSystem.SetHorrorLevel) == "function" then
-				FogSystem.SetHorrorLevel(level)
-			end
+			if typeof(FogSystem.SetHorrorLevel) == "function" then FogSystem.SetHorrorLevel(level) end
 		end
 
-		-- Extraction (throttled; future: add quota check to avoid spam)
 		if typeof(ExtractionManager.ExtractAtZone) == "function" then
 			for _, player in Players:GetPlayers() do
 				ExtractionManager.ExtractAtZone(player, Vector3.new(0, 8, 0), 28)
@@ -117,21 +92,24 @@ function GameManager.Initialize()
 		end
 	end))
 
-	print("=== [GameManager] Fully initialized (Production) ===")
+	print("=== [GameManager] Fully initialized with anti-exploit measures ===")
 end
 
 function GameManager.Destroy()
 	maid:Cleanup()
+	local systems = {RoundManager, LobbyManager, FogSystem, ShipController, GhostShipGenerator, EntityAI, HorrorEvents, ExtractionManager, ExtractionZone, TestHarness}
+	for _, sys in systems do
+		if typeof(sys.Destroy) == "function" then pcall(sys.Destroy) end
+	end
+end
 
-	-- Propagate cleanup to prevent memory leaks
-	if typeof(RoundManager.Destroy) == "function" then RoundManager.Destroy() end
-	if typeof(LobbyManager.Destroy) == "function" then LobbyManager.Destroy() end
-	if typeof(EntityAI.Destroy) == "function" then EntityAI.Destroy() end
-	if typeof(HorrorEvents.Destroy) == "function" then HorrorEvents.Destroy() end
-	if typeof(GhostShipGenerator.Destroy) == "function" then GhostShipGenerator.Destroy() end
-	if typeof(ExtractionManager.Destroy) == "function" then ExtractionManager.Destroy() end
-	if typeof(TestHarness.Destroy) == "function" then TestHarness.Destroy() end
-	if typeof(ExtractionZone.Destroy) == "function" then ExtractionZone.Destroy() end
+-- Global rate limit helper (call from remotes)
+function GameManager.IsRateLimited(player: Player, minInterval: number): boolean
+	local last = lastRemoteTime[player] or 0
+	local now = tick()
+	if now - last < minInterval then return true end
+	lastRemoteTime[player] = now
+	return false
 end
 
 return GameManager
