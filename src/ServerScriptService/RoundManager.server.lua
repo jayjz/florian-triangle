@@ -1,43 +1,42 @@
 --!strict
--- RoundManager.server.lua (ServerScriptService)
--- Handles round state, quota tracking, and win/lose conditions.
--- One Piece themed: "Escape the Florian Triangle by paying the toll."
-
+-- RoundManager.server.lua
+local Utils = require(game.ReplicatedStorage.Modules.Utils)
 local RoundManager = {}
 
-local EXTRACTION_QUOTA = 1000 -- Beli needed to escape
-
+local EXTRACTION_QUOTA = 1000
 local currentExtracted = 0
 local roundActive = false
 
+local WinRemote = Utils.CreateRemoteEvent("RoundWin")
+
 local function checkWinCondition()
-    if currentExtracted >= EXTRACTION_QUOTA then
-        print("=== [RoundManager] WIN — Crew has paid the toll and escaped the Florian Triangle ===")
-        roundActive = false
-        -- TODO: Fire RemoteEvent to all clients to show win screen
-    end
+	if currentExtracted >= EXTRACTION_QUOTA then
+		print("=== [RoundManager] WIN — Crew paid the toll! ===")
+		roundActive = false
+		WinRemote:FireAllClients(true)
+	end
 end
 
 function RoundManager.AddExtracted(amount: number)
-    if not roundActive then return end
-
-    currentExtracted += amount
-    print(`[RoundManager] Total extracted: {currentExtracted} / {EXTRACTION_QUOTA}`)
-
-    checkWinCondition()
+	if not roundActive then return end
+	currentExtracted += amount
+	print(`[RoundManager] Extracted: {currentExtracted} / {EXTRACTION_QUOTA}`)
+	checkWinCondition()
 end
 
 function RoundManager.StartRound()
-    currentExtracted = 0
-    roundActive = true
-    print("[RoundManager] New round started. Quota:", EXTRACTION_QUOTA)
+	currentExtracted = 0
+	roundActive = true
+	print(`[RoundManager] Round started. Quota: {EXTRACTION_QUOTA}`)
 end
 
-function RoundManager.GetProgress(): (number, number, boolean)
-    return currentExtracted, EXTRACTION_QUOTA, roundActive
+function RoundManager.GetProgress()
+	return currentExtracted, EXTRACTION_QUOTA, roundActive
 end
 
--- Expose globally so other scripts can access it safely
-_G.RoundManager = RoundManager
+function RoundManager.Initialize()
+	RoundManager.StartRound()
+	print("[RoundManager] Initialized")
+end
 
-print("[RoundManager] Loaded successfully")
+return RoundManager

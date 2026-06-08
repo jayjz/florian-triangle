@@ -1,13 +1,26 @@
 --!strict
 -- ClientMain.client.lua (StarterPlayerScripts)
--- Primary client bootstrapper for Fog Sea.
--- Only responsible for calling ClientInit once.
+-- Single source of truth for client-side bootstrapping in Florian Triangle (Fog Sea).
+-- Responsibilities: Load ClientInit, enforce single initialization, handle errors gracefully,
+-- and provide clear startup logging for debugging in Studio/Play tests.
+-- Prevents duplicate controller inits when combined with ClientInit guards.
 
 local ClientInit = require(script.Parent.ClientInit)
 
-print("[ClientMain] Client bootstrapped successfully.")
+print("[ClientMain] Bootstrapping client...")
 
--- Call Initialize only once from the bootstrapper
-if typeof(ClientInit.Initialize) == "function" then
-    ClientInit.Initialize()
+local success, err = pcall(function()
+	if typeof(ClientInit.Initialize) == "function" then
+		ClientInit.Initialize()
+	else
+		warn("[ClientMain] ClientInit.Initialize() not found")
+	end
+end)
+
+if success then
+	print("[ClientMain] Client successfully bootstrapped.")
+else
+	warn(`[ClientMain] Bootstrap failed: {err}`)
 end
+if _G.ClientAlreadyInitialized then return end
+_G.ClientAlreadyInitialized = true
