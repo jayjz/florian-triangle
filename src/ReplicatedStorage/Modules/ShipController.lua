@@ -61,7 +61,10 @@ function ShipController.Initialize()
 		end
 
 		local ship = activeShips[player]
-		local targetVelocity = if moveDir.Magnitude > 0 then moveDir.Unit * CONFIG.MaxSpeed else Vector3.new()
+		local targetVelocity = Vector3.new()
+		if moveDir.Magnitude > 0 then
+			targetVelocity = moveDir.Unit * CONFIG.MaxSpeed
+		end
 		ship.Velocity = ship.Velocity:Lerp(targetVelocity, 0.38)
 		ship.LastInputTime = tick()
 	end)
