@@ -1,10 +1,12 @@
 --!strict
 -- ShipController.lua (ReplicatedStorage/Modules)
 -- Client-authoritative sailing with server validation, rate limiting, and strong weight penalties.
--- High quality: Input validation, rate limiting per Roblox security best practices, smooth physics.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
+local AudioManager = require(script.Parent.AudioManager)
+local HorrorEvents = require(script.Parent.HorrorEvents)
+
 local RunService = Utils.GetService("RunService")
 local Players = Utils.GetService("Players")
 local CollectionService = Utils.GetService("CollectionService")
@@ -59,11 +61,12 @@ function ShipController.Initialize()
 		end
 
 		local ship = activeShips[player]
-		ship.Velocity = ship.Velocity:Lerp(moveDir.Unit * CONFIG.MaxSpeed, 0.38)
+		local targetVelocity = if moveDir.Magnitude > 0 then moveDir.Unit * CONFIG.MaxSpeed else Vector3.new()
+		ship.Velocity = ship.Velocity:Lerp(targetVelocity, 0.38)
 		ship.LastInputTime = tick()
-	end))
+	end)
 
-	print("[ShipController] Initialized - Secure sailing with strong weight penalties")
+	print("[ShipController] Initialized - Secure sailing active")
 end
 
 function ShipController.UpdatePlayerWeight(player: Player, newWeight: number)
@@ -84,8 +87,13 @@ function ShipController.AttemptDock(player: Player)
 		local primary = ghost.PrimaryPart
 		if primary and (primary.Position - root.Position).Magnitude < CONFIG.DockingDistance then
 			ship.LastDockTime = tick()
+			
+			-- Boarding effects
 			Remotes.PlayerDocked:FireClient(player, ghost)
-			FogSystem.TriggerHorrorPulse(0.9)
+			AudioManager.PlayBoardingSound(ghost)
+			HorrorEvents.TriggerSanityDamage(player, 12) -- Mental shock of boarding a haunted ship
+			HorrorEvents.TriggerHorrorPulse(0.8)
+			
 			return true
 		end
 	end

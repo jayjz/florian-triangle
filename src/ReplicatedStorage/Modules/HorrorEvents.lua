@@ -2,7 +2,6 @@
 -- HorrorEvents.lua (ReplicatedStorage/Modules)
 -- Production hallucination + sanity system with server triggers.
 -- Integrates with FogSystem closing circle for dynamic horror escalation.
--- High quality: Cooldowns, probability, player-specific weighting, defensive design.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
@@ -45,7 +44,7 @@ function HorrorEvents.Initialize()
 		lastHallucination[player] = nil
 	end)
 
-	print("[HorrorEvents] Initialized - Hallucination system with cooldowns active")
+	print("[HorrorEvents] Initialized - Hallucination system active")
 end
 
 function HorrorEvents:Update(dt: number)
@@ -54,23 +53,46 @@ function HorrorEvents:Update(dt: number)
 		local root = player.Character:FindFirstChild("HumanoidRootPart")
 		if not root then continue end
 
+		-- Increased decay in dense fog or outside safe zone
 		local inDenseFog = FogSystem.GetVisibilityDistance() < 70
-		local decay = CONFIG.BaseDecay * (inDenseFog and CONFIG.FogMultiplier or 1.0)
+		local outsideSafeZone = not FogSystem.IsInSafeZone(root.Position)
+		
+		local decay = CONFIG.BaseDecay
+		if outsideSafeZone then
+			decay *= 4.0 -- Deadly outside safe zone
+		elseif inDenseFog then
+			decay *= CONFIG.FogMultiplier
+		end
+		
 		local newSanity = Utils.Clamp(level - (decay * dt), 0, 100)
-
 		playerSanity[player] = newSanity
-		Remotes.SanityChanged:FireClient(player, math.floor(newSanity))
+		
+		-- Only fire if value changed significantly to save bandwidth
+		if math.floor(level) ~= math.floor(newSanity) then
+			Remotes.SanityChanged:FireClient(player, math.floor(newSanity))
+		end
 
 		-- Hallucination triggers at low sanity
 		if newSanity < CONFIG.HallucinationThreshold then
 			local now = tick()
 			if not lastHallucination[player] or (now - lastHallucination[player]) > CONFIG.HallucinationCooldown then
-				if math.random() < 0.12 then  -- Tuned probability
-					Remotes.HallucinationTriggered:FireClient(player, math.random(1, 3))  -- 1=shadow, 2=whispers, 3=fake entity
+				-- Chance increases as sanity drops
+				local chance = (CONFIG.HallucinationThreshold - newSanity) / 100 + 0.05
+				if math.random() < chance then
+					local hType = math.random(1, 3) -- 1=Shadow, 2=Whispers, 3=Glitch/Fake Entity
+					Remotes.HallucinationTriggered:FireClient(player, hType)
 					lastHallucination[player] = now
 				end
 			end
 		end
+	end
+end
+
+function HorrorEvents.TriggerSanityDamage(player: Player, amount: number)
+	local current = playerSanity[player]
+	if current then
+		playerSanity[player] = Utils.Clamp(current - amount, 0, 100)
+		Remotes.SanityChanged:FireClient(player, math.floor(playerSanity[player]))
 	end
 end
 

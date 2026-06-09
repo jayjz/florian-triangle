@@ -13,6 +13,7 @@ AudioManager.__index = AudioManager
 local Remotes = {
 	HorrorPulse = Utils.CreateRemoteEvent("HorrorPulse"),
 	HallucinationTriggered = Utils.CreateRemoteEvent("HallucinationTriggered"),
+	PlaySpatialSound = Utils.CreateRemoteEvent("PlaySpatialSound"),
 }
 
 local globalMaid = Utils.CreateMaid()
@@ -25,6 +26,7 @@ local SOUNDS = {
 	Jumpscare = "rbxassetid://131057854",
 	BoardingCreak = "rbxassetid://184260712",
 	ExtractionToll = "rbxassetid://131057912",
+	GhostShipAmbient = "rbxassetid://184260712", -- Eerie creaking
 }
 
 local function playSpatial(parent: Instance, soundId: string, volume: number, maxDist: number)
@@ -60,18 +62,20 @@ function AudioManager.Initialize()
 			playSpatial(char.PrimaryPart, SOUNDS.Whisper, 0.9, 80)
 		end
 	end)
+	
+	Remotes.PlaySpatialSound.OnClientEvent:Connect(function(soundName: string, parent: Instance, volume: number?, maxDist: number?)
+		local soundId = SOUNDS[soundName]
+		if soundId then
+			playSpatial(parent, soundId, volume or 0.7, maxDist or 80)
+		end
+	end)
 
 	print("[AudioManager] Initialized - Spatial horror audio ready")
 end
 
 function AudioManager.PlayBoardingSound(ship: Model)
-	-- Called from ShipController on dock
-	for _, player in Players:GetPlayers() do
-		local char = player.Character
-		if char and char.PrimaryPart and (char.PrimaryPart.Position - ship.PrimaryPart.Position).Magnitude < 60 then
-			-- Fire client for local spatial sound
-		end
-	end
+	-- Called from ShipController on dock (Server)
+	Remotes.PlaySpatialSound:FireAllClients("BoardingCreak", ship.PrimaryPart or ship, 1.0, 150)
 end
 
 function AudioManager.Destroy()

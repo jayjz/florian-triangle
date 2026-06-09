@@ -2,16 +2,16 @@
 -- GameManager.lua (ServerScriptService)
 -- Central orchestrator with rate limiting and anti-exploit wrappers.
 
-local Utils = require(script.Parent.Parent.ReplicatedStorage.Modules.Utils)
+local Utils = require(game.ReplicatedStorage.Modules.Utils)
 
 local RoundManager = require(script.Parent.RoundManager)
 local LobbyManager = require(script.Parent.LobbyManager)
-local FogSystem = require(script.Parent.Parent.ReplicatedStorage.Modules.FogSystem)
-local ShipController = require(script.Parent.Parent.ReplicatedStorage.Modules.ShipController)
-local GhostShipGenerator = require(script.Parent.Parent.ReplicatedStorage.Modules.GhostShipGenerator)
-local EntityAI = require(script.Parent.Parent.ReplicatedStorage.Modules.EntityAI)
-local HorrorEvents = require(script.Parent.Parent.ReplicatedStorage.Modules.HorrorEvents)
-local ExtractionManager = require(script.Parent.Parent.ReplicatedStorage.Modules.ExtractionManager)
+local FogSystem = require(game.ReplicatedStorage.Modules.FogSystem)
+local ShipController = require(game.ReplicatedStorage.Modules.ShipController)
+local GhostShipGenerator = require(game.ReplicatedStorage.Modules.GhostShipGenerator)
+local EntityAI = require(game.ReplicatedStorage.Modules.EntityAI)
+local HorrorEvents = require(game.ReplicatedStorage.Modules.HorrorEvents)
+local ExtractionManager = require(game.ReplicatedStorage.Modules.ExtractionManager)
 local ExtractionZone = require(script.Parent.ExtractionZone)
 local TestHarness = require(script.Parent.TestHarness)
 
