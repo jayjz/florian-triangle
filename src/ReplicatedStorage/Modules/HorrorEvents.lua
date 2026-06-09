@@ -30,6 +30,15 @@ local CONFIG = {
 
 local lastHallucination: {[Player]: number} = {}
 
+local function checkSafeZone(player: Player): boolean
+	local char = player.Character
+	if not char then return true end
+	local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then return true end
+	
+	return FogSystem.IsInSafeZone(root.Position)
+end
+
 function HorrorEvents.Initialize()
 	globalMaid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
 		HorrorEvents:Update(dt)
@@ -50,24 +59,18 @@ end
 function HorrorEvents:Update(dt: number)
 	for player, level in playerSanity do
 		if not player.Character then continue end
-		local root = player.Character:FindFirstChild("HumanoidRootPart")
-		if not root then continue end
-
-		-- Increased decay in dense fog or outside safe zone
-		local inDenseFog = FogSystem.GetVisibilityDistance() < 70
-		local outsideSafeZone = not FogSystem.IsInSafeZone(root.Position)
 		
-		local decay = CONFIG.BaseDecay
-		if outsideSafeZone then
-			decay *= 4.0 -- Deadly outside safe zone
-		elseif inDenseFog then
-			decay *= CONFIG.FogMultiplier
-		end
+		local inSafeZone = checkSafeZone(player)
+		local inDenseFog = FogSystem.GetVisibilityDistance() < 70
+		
+		-- Sanity Gaslighting: Umibozu influence makes you lose sanity faster outside safe zone
+		local baseDecay = if inSafeZone then CONFIG.BaseDecay else CONFIG.BaseDecay * 3.5
+		local decay = baseDecay * (inDenseFog and CONFIG.FogMultiplier or 1.0)
 		
 		local newSanity = Utils.Clamp(level - (decay * dt), 0, 100)
 		playerSanity[player] = newSanity
 		
-		-- Only fire if value changed significantly to save bandwidth
+		-- Throttle network updates but ensure critical drops are sent
 		if math.floor(level) ~= math.floor(newSanity) then
 			Remotes.SanityChanged:FireClient(player, math.floor(newSanity))
 		end
@@ -76,10 +79,10 @@ function HorrorEvents:Update(dt: number)
 		if newSanity < CONFIG.HallucinationThreshold then
 			local now = tick()
 			if not lastHallucination[player] or (now - lastHallucination[player]) > CONFIG.HallucinationCooldown then
-				-- Chance increases as sanity drops
-				local chance = (CONFIG.HallucinationThreshold - newSanity) / 100 + 0.05
+				-- Chance increases as sanity drops (gaslighting)
+				local chance = (CONFIG.HallucinationThreshold - newSanity) / 100 + 0.12
 				if math.random() < chance then
-					local hType = math.random(1, 3) -- 1=Shadow, 2=Whispers, 3=Glitch/Fake Entity
+					local hType = math.random(1, 4) -- 1=Shadow, 2=Whispers, 3=Fake Entity, 4=Gaslight UI
 					Remotes.HallucinationTriggered:FireClient(player, hType)
 					lastHallucination[player] = now
 				end

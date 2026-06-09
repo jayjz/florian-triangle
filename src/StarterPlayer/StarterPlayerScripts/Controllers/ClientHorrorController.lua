@@ -62,7 +62,7 @@ function ClientHorrorController.Initialize()
 		end
 	end))
 
-	print("[ClientHorrorController] Initialized with full audio + hallucination system")
+	print("[ClientHorrorController] Initialized - Terrifying atmosphere active")
 end
 
 function ClientHorrorController:ApplyPulseEffect(intensity: number)
@@ -81,13 +81,16 @@ function ClientHorrorController:ApplyPulseEffect(intensity: number)
 end
 
 function ClientHorrorController:TriggerHallucination(type: number)
-	-- Type 1: Jumpscare, Type 2: Whisper/Blur, Type 3: Shadow Man
+	-- 1=Jumpscare, 2=Whispers/Blur, 3=Shadow Man (Umibozu), 4=Gaslight UI
 	if type == 1 then
 		ClientHorrorController:TriggerJumpscare(1.3)
 	elseif type == 2 then
 		ClientHorrorController:ApplyPulseEffect(0.4)
+		-- AudioManager handles whispers
 	elseif type == 3 then
 		ClientHorrorController:SpawnShadowMan()
+	elseif type == 4 then
+		ClientHorrorController:GaslightUI()
 	end
 end
 
@@ -95,27 +98,43 @@ function ClientHorrorController:SpawnShadowMan()
 	local char = game.Players.LocalPlayer.Character
 	if not char or not char.PrimaryPart then return end
 	
-	-- Spawn a simple dark part behind player or just in view
+	-- Umibozu-style silhouette
 	local shadow = Instance.new("Part")
-	shadow.Name = "ShadowMan"
-	shadow.Size = Vector3.new(4, 7, 1)
+	shadow.Name = "UmibozuShadow"
+	shadow.Size = Vector3.new(12, 25, 2)
 	shadow.Color = Color3.new(0, 0, 0)
 	shadow.Material = Enum.Material.Neon
-	shadow.Transparency = 0.4
+	shadow.Transparency = 0.35
 	shadow.CanCollide = false
 	shadow.Anchored = true
 	
-	-- Position it 15 studs behind player, then move it slightly out of sight
-	local targetPos = char.PrimaryPart.CFrame * CFrame.new(math.random(-15, 15), 0, 15)
-	shadow.CFrame = targetPos
+	-- Spawn in fog, slightly behind or beside player
+	local angle = math.random() * math.pi * 2
+	local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * 45
+	shadow.Position = char.PrimaryPart.Position + offset
+	shadow.CFrame = CFrame.lookAt(shadow.Position, char.PrimaryPart.Position)
 	shadow.Parent = workspace
 	
-	task.delay(1.5, function()
+	task.delay(2.2, function()
 		if shadow then
-			local t = TweenService:Create(shadow, TweenInfo.new(0.8), {Transparency = 1})
+			local t = TweenService:Create(shadow, TweenInfo.new(1.2), {Transparency = 1, Size = shadow.Size * 1.5})
 			t:Play()
 			t.Completed:Connect(function() shadow:Destroy() end)
 		end
+	end)
+end
+
+function ClientHorrorController:GaslightUI()
+	-- Flicker sanity UI or show fake values
+	local playerGui = game.Players.LocalPlayer:FindFirstChild("PlayerGui")
+	local hud = playerGui and playerGui:FindFirstChild("FogSeaHUD")
+	if not hud then return end
+	
+	local originalSanity = currentSanity
+	currentSanity = math.random(5, 25) -- Fake extreme drop
+	
+	task.delay(3.5, function()
+		currentSanity = originalSanity
 	end)
 end
 
