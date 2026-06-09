@@ -48,6 +48,7 @@ function FogSystem.IsInSafeZone(position: Vector3): boolean
 	return (position - CONFIG.centerPosition).Magnitude <= currentSafeRadius
 end
 
+-- THIS IS THE FUNCTION THAT WAS MISSING
 function FogSystem.GetSanityDrainMultiplier(position: Vector3): number
 	if FogSystem.IsInSafeZone(position) then
 		return 0.0

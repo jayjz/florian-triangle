@@ -49,9 +49,9 @@ function HorrorEvents:Update(dt: number)
 		local root = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		if not root then continue end
 
-		-- Defensive nil protection
+		-- Strong nil protection
 		local multiplier = 0.0
-		if FogSystem and FogSystem.GetSanityDrainMultiplier then
+		if FogSystem and typeof(FogSystem.GetSanityDrainMultiplier) == "function" then
 			multiplier = FogSystem.GetSanityDrainMultiplier(root.Position)
 		end
 
@@ -63,7 +63,7 @@ function HorrorEvents:Update(dt: number)
 			Remotes.SanityChanged:FireClient(player, math.floor(newSanity))
 		end
 
-		-- Hallucinations at low sanity
+		-- Hallucinations
 		if newSanity < CONFIG.HallucinationThreshold then
 			local now = tick()
 			if not lastHallucination[player] or (now - lastHallucination[player]) > CONFIG.HallucinationCooldown then
@@ -76,20 +76,6 @@ function HorrorEvents:Update(dt: number)
 			end
 		end
 	end
-end
-
-function HorrorEvents.TriggerSanityDamage(player: Player, amount: number)
-	if playerSanity[player] then
-		playerSanity[player] = Utils.Clamp(playerSanity[player] - amount, 0, 100)
-	end
-end
-
-function HorrorEvents.TriggerHorrorPulse(intensity: number)
-	-- Can be expanded later
-end
-
-function HorrorEvents.GetHorrorLevel(): number
-	return 0 -- Placeholder - expand with actual logic if needed
 end
 
 function HorrorEvents.Destroy()
