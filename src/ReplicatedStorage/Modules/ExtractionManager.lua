@@ -5,7 +5,7 @@
 
 local Utils = require(script.Parent.Utils)
 local ShipController = require(script.Parent.ShipController)
-local RoundManager = require(script.Parent.Parent.ServerScriptService.RoundManager)
+-- local RoundManager = require(script.Parent.Parent.ServerScriptService.RoundManager) -- REMOVED: ReplicatedStorage cannot require from ServerScriptService
 
 local CollectionService = Utils.GetService("CollectionService")
 local RunService = Utils.GetService("RunService")
@@ -22,6 +22,7 @@ local Remotes = {
 
 local activeChests: {[Model]: {Model: Model, Weight: number, Value: number, Ship: any, Maid: any}} = {}
 local playerWeight: {[Player]: number} = {}
+local playerValue: {[Player]: number} = {}
 local chestPool: {Model} = {}
 local globalMaid = Utils.CreateMaid()
 
@@ -62,6 +63,32 @@ local function returnToPool(model: Model)
 	end
 end
 
+function ExtractionManager.RegisterChest(chestModel: Model, weight: number, value: number)
+	if not activeChests[chestModel] then
+		activeChests[chestModel] = {
+			Model = chestModel,
+			Weight = weight or CONFIG.BaseWeight,
+			Value = value or math.random(50, 250),
+			Maid = Utils.CreateMaid()
+		}
+		
+		-- Add proximity prompt for pickup
+		local root = chestModel.PrimaryPart
+		if root then
+			local prompt = Instance.new("ProximityPrompt")
+			prompt.ActionText = "Scavenge Cursed Treasure"
+			prompt.ObjectText = "Cursed Chest"
+			prompt.HoldDuration = 1.2
+			prompt.MaxActivationDistance = 12
+			prompt.Parent = root
+			
+			activeChests[chestModel].Maid:GiveTask(prompt.Triggered:Connect(function(player)
+				ExtractionManager.HandlePickup(player, chestModel)
+			end))
+		end
+	end
+end
+
 function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
 	local chest = activeChests[chestModel]
 	if not chest then return end
@@ -78,14 +105,35 @@ function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
 	end
 
 	playerWeight[player] = current + chest.Weight
+	playerValue[player] = (playerValue[player] or 0) + chest.Value
+	
 	ShipController.UpdatePlayerWeight(player, playerWeight[player])
-
-	Remotes.WeightUpdated:FireClient(player, playerWeight[player], chest.Value)
+	
+	Remotes.WeightUpdated:FireClient(player, playerWeight[player], playerValue[player])
 	Remotes.PickupEffect:FireClient(player, "Success", chest.Value)
 
 	if chest.Maid then chest.Maid:Cleanup() end
 	returnToPool(chest.Model)
 	activeChests[chestModel] = nil
+end
+
+function ExtractionManager.ExtractAtZone(player: Player, zonePos: Vector3, radius: number): number
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root or (root.Position - zonePos).Magnitude > radius then
+		return 0
+	end
+
+	local value = playerValue[player] or 0
+	if value > 0 then
+		playerValue[player] = 0
+		playerWeight[player] = 0
+		ShipController.UpdatePlayerWeight(player, 0)
+		Remotes.WeightUpdated:FireClient(player, 0, 0)
+		Remotes.ExtractionSuccess:FireClient(player, value)
+		print(`[ExtractionManager] {player.Name} extracted {value} loot!`)
+	end
+	
+	return value
 end
 
 function ExtractionManager.Initialize()

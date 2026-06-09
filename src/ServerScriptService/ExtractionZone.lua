@@ -2,9 +2,13 @@
 -- ExtractionZone.server.lua (ServerScriptService)
 -- Creates and manages the visible Extraction Zone (Cursed Beacon).
 
+local ExtractionManager = require(game.ReplicatedStorage.Modules.ExtractionManager)
+local RoundManager = require(script.Parent.RoundManager)
+
 local EXTRACTION_POSITION = Vector3.new(0, 95, 0)
 local EXTRACTION_RADIUS = 28
 
+local ExtractionZone = {}
 local zonePart: Part
 local billboard: BillboardGui
 local label: TextLabel
@@ -50,7 +54,10 @@ local function setupProximityPrompt()
 
     prompt.Triggered:Connect(function(player: Player)
         if typeof(ExtractionManager.ExtractAtZone) == "function" then
-            ExtractionManager.ExtractAtZone(player, EXTRACTION_POSITION, EXTRACTION_RADIUS)
+            local value = ExtractionManager.ExtractAtZone(player, EXTRACTION_POSITION, EXTRACTION_RADIUS)
+			if value > 0 then
+				RoundManager.AddExtracted(value)
+			end
         end
     end)
 end

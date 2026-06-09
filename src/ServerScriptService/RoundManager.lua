@@ -16,6 +16,18 @@ local roundStartTime = 0
 local WinRemote = Utils.CreateRemoteEvent("RoundWin")
 local LoseRemote = Utils.CreateRemoteEvent("RoundLose")
 
+local function spawnGhostShips()
+	local GhostShipGenerator = require(game.ReplicatedStorage.Modules.GhostShipGenerator)
+	local numShips = math.random(2, 4)
+	print(`[RoundManager] Spawning {numShips} ghost ships...`)
+	for i = 1, numShips do
+		local angle = math.rad(math.random(0, 360))
+		local dist = math.random(150, 300)
+		local spawnPos = Vector3.new(math.cos(angle) * dist, 50, math.sin(angle) * dist)
+		GhostShipGenerator.CreateTestShip(spawnPos)
+	end
+end
+
 local function checkWinCondition()
 	if currentExtracted >= EXTRACTION_QUOTA then
 		print("=== [RoundManager] WIN — Crew paid the toll and escaped! ===")
@@ -55,6 +67,9 @@ function RoundManager.StartRound()
 	
 	-- Start the mist closing circle when round begins
 	FogSystem.StartClosingCircle()
+	
+	-- Spawn ghost ships for scavenging
+	spawnGhostShips()
 	
 	print(`[RoundManager] New round started. Quota: {EXTRACTION_QUOTA}`)
 end
