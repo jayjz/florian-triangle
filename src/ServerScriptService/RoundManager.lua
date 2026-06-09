@@ -1,9 +1,8 @@
 --!strict
--- RoundManager.server.lua (ServerScriptService)
+-- RoundManager.lua (ServerScriptService)
 -- Complete round state, quota, win/lose conditions, and lobby reset flow.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
-local LobbyManager = require(script.Parent.LobbyManager)
 
 local RoundManager = {}
 
@@ -21,6 +20,7 @@ local function checkWinCondition()
 		roundActive = false
 		WinRemote:FireAllClients(true)
 		task.delay(4, function()
+			local LobbyManager = require(script.Parent.LobbyManager)
 			LobbyManager.ReturnToLobby()
 		end)
 	end
@@ -33,6 +33,7 @@ local function checkLoseCondition()
 		roundActive = false
 		LoseRemote:FireAllClients(true)
 		task.delay(4, function()
+			local LobbyManager = require(script.Parent.LobbyManager)
 			LobbyManager.ReturnToLobby()
 		end)
 	end
@@ -57,7 +58,7 @@ function RoundManager.GetProgress(): (number, number, boolean)
 end
 
 function RoundManager.Initialize()
-	RoundManager.StartRound()
+	-- Round normally starts via LobbyManager or GameManager
 	print("[RoundManager] Initialized with win/lose flow")
 end
 
