@@ -1,10 +1,9 @@
 --!strict
--- LobbyManager.server.lua (ServerScriptService)
+-- LobbyManager.lua (ServerScriptService)
 -- Handles Foosha Village lobby, player ready-up, 10s countdown, then spawns to Windmill Village.
 -- Integrates with RoundManager + GameManager.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
-local RoundManager = require(script.Parent.RoundManager)
 
 local Players = Utils.GetService("Players")
 local RunService = Utils.GetService("RunService")
@@ -12,7 +11,7 @@ local CollectionService = Utils.GetService("CollectionService")
 
 local LobbyManager = {}
 
-local MIN_PLAYERS = 2
+local MIN_PLAYERS = 1 -- Changed to 1 for easier testing, but can be 2
 local MAX_PLAYERS = 6
 local COUNTDOWN_TIME = 10
 
@@ -25,6 +24,7 @@ local readyPlayers: {[Player]: boolean} = {}
 
 local maid = Utils.CreateMaid()
 local CountdownRemote = Utils.CreateRemoteEvent("LobbyCountdown")
+local LobbyReadyRemote = Utils.CreateRemoteEvent("LobbyReady")
 
 function LobbyManager.Initialize()
 	-- Find spawns
@@ -33,6 +33,10 @@ function LobbyManager.Initialize()
 
 	Players.PlayerAdded:Connect(LobbyManager.OnPlayerAdded)
 	Players.PlayerRemoving:Connect(LobbyManager.OnPlayerRemoving)
+	
+	LobbyReadyRemote.OnServerEvent:Connect(function(player, isReady)
+		LobbyManager.SetReady(player, isReady)
+	end)
 
 	print("[LobbyManager] Initialized - Foosha Lobby Active")
 end
@@ -40,7 +44,11 @@ end
 function LobbyManager.OnPlayerAdded(player: Player)
 	player.CharacterAdded:Connect(function(char)
 		task.wait(1)
-		LobbyManager.TeleportToLobby(player)
+		if isInLobby then
+			LobbyManager.TeleportToLobby(player)
+		else
+			LobbyManager.TeleportToGame(player)
+		end
 	end)
 end
 
@@ -84,17 +92,21 @@ function LobbyManager.StartCountdown()
 	for i = COUNTDOWN_TIME, 0, -1 do
 		CountdownRemote:FireAllClients(i)
 		task.wait(1)
+		if not isInLobby then break end -- Stop if round started early or cancelled
 	end
 
-	-- Transition to game
-	isInLobby = false
-	RoundManager.StartRound()  -- Or via GameManager
+	if isInLobby then
+		-- Transition to game
+		isInLobby = false
+		local RoundManager = require(script.Parent.RoundManager)
+		RoundManager.StartRound()
 
-	for _, player in Players:GetPlayers() do
-		LobbyManager.TeleportToGame(player)
+		for _, player in Players:GetPlayers() do
+			LobbyManager.TeleportToGame(player)
+		end
+
+		print("[LobbyManager] Round started - Players teleported to Windmill Village")
 	end
-
-	print("[LobbyManager] Round started - Players teleported to Windmill Village")
 	countdownActive = false
 end
 
@@ -106,6 +118,15 @@ function LobbyManager.TeleportToGame(player: Player)
 			root.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
 		end
 	end
+end
+
+function LobbyManager.ReturnToLobby()
+	isInLobby = true
+	readyPlayers = {}
+	for _, player in Players:GetPlayers() do
+		LobbyManager.TeleportToLobby(player)
+	end
+	print("[LobbyManager] Players returned to lobby")
 end
 
 function LobbyManager.Destroy()
