@@ -2,7 +2,7 @@
 -- ExtractionZone.server.lua (ServerScriptService)
 -- Creates and manages the visible Extraction Zone (Cursed Beacon).
 
-local EXTRACTION_POSITION = Vector3.new(0, 52, 0)
+local EXTRACTION_POSITION = Vector3.new(0, 95, 0)
 local EXTRACTION_RADIUS = 28
 
 local zonePart: Part

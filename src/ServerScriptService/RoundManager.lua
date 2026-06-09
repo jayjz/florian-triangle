@@ -1,8 +1,10 @@
 --!strict
 -- RoundManager.lua (ServerScriptService)
 -- Complete round state, quota, win/lose conditions, and lobby reset flow.
+-- Integrated FogSystem closing circle on round start.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
+local FogSystem = require(game.ReplicatedStorage.Modules.FogSystem)  -- Added require
 
 local RoundManager = {}
 
@@ -50,6 +52,10 @@ function RoundManager.StartRound()
 	currentExtracted = 0
 	roundActive = true
 	roundStartTime = tick()
+	
+	-- Start the mist closing circle when round begins
+	FogSystem.StartClosingCircle()
+	
 	print(`[RoundManager] New round started. Quota: {EXTRACTION_QUOTA}`)
 end
 
