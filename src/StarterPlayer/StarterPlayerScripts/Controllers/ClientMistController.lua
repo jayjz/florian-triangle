@@ -20,12 +20,18 @@ local MIST_CONFIG = {
 	UpdateRate = 1 / 12,          -- 12Hz visual updates
 	Color = Color3.fromRGB(35, 85, 55),
 	Transparency = 0.35,
+	BaseDensity = 0.28,           -- Reduced to prevent extreme darkness
+	MaxDensityMultiplier = 0.6,
+	MinBrightness = 0.6,          -- Brightness control
 }
 
 local mistFolder: Folder? = nil
 local mistWalls: {Part} = {}
 local lastUpdate = 0
 local centerPosition = Vector3.new(0, 60, 0)  -- Map center - adjust in Studio if needed
+
+local originalAmbient = Lighting.Ambient
+local originalBrightness = Lighting.Brightness
 
 function ClientMistController.Initialize()
 	if mistFolder then return end
@@ -91,11 +97,21 @@ function ClientMistController:UpdateMistWalls()
 	-- Global atmosphere boost from client side
 	if Lighting:FindFirstChild("Atmosphere") then
 		local atm = Lighting.Atmosphere :: Atmosphere
-		atm.Density = 0.4 + phase * 1.1
+		-- Reduced density to fix extreme darkness
+		atm.Density = MIST_CONFIG.BaseDensity + phase * MIST_CONFIG.MaxDensityMultiplier
+		
+		-- Lighting fallback and brightness control
+		Lighting.Brightness = math.max(MIST_CONFIG.MinBrightness, originalBrightness - (phase * 1.2))
+		
+		-- Give ambient light a creepy green tint instead of pure black
+		local ambientTarget = Color3.fromRGB(20, 45, 30)
+		Lighting.Ambient = originalAmbient:Lerp(ambientTarget, math.clamp(phase, 0, 1))
 	end
 end
 
 function ClientMistController.Destroy()
+	Lighting.Ambient = originalAmbient
+	Lighting.Brightness = originalBrightness
 	maid:Cleanup()
 	if mistFolder then
 		mistFolder:Destroy()
