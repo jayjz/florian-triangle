@@ -87,7 +87,7 @@ function GameManager.Initialize()
 
 		if typeof(ExtractionManager.ExtractAtZone) == "function" then
 			for _, player in Players:GetPlayers() do
-				ExtractionManager.ExtractAtZone(player, Vector3.new(0, 8, 0), 28)
+				ExtractionManager.ExtractAtZone(player, Vector3.new(0, 52, 0), 28)
 			end
 		end
 	end))
