@@ -94,20 +94,27 @@ function Utils.GetService(serviceName: string)
 	return Services[serviceName]
 end
 
--- RemoteEvent safe wrapper (prevents common anti-patterns)
+-- RemoteEvent safe wrapper (prevents client-side spoofing/creation)
 function Utils.CreateRemoteEvent(name: string)
-	local eventsFolder = Utils.GetService("ReplicatedStorage"):FindFirstChild("Events")
-		or Instance.new("Folder")
-	eventsFolder.Name = "Events"
-	eventsFolder.Parent = Utils.GetService("ReplicatedStorage")
+	local RunService = Utils.GetService("RunService")
+	local rs = Utils.GetService("ReplicatedStorage")
 	
-	local remote = eventsFolder:FindFirstChild(name)
-	if not remote then
-		remote = Instance.new("RemoteEvent")
-		remote.Name = name
-		remote.Parent = eventsFolder
+	if RunService:IsServer() then
+		local eventsFolder = rs:FindFirstChild("Events") or Instance.new("Folder")
+		eventsFolder.Name = "Events"
+		eventsFolder.Parent = rs
+		
+		local remote = eventsFolder:FindFirstChild(name)
+		if not remote then
+			remote = Instance.new("RemoteEvent")
+			remote.Name = name
+			remote.Parent = eventsFolder
+		end
+		return remote
+	else
+		local eventsFolder = rs:WaitForChild("Events")
+		return eventsFolder:WaitForChild(name)
 	end
-	return remote
 end
 
 return Utils

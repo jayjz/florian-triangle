@@ -20,7 +20,9 @@ local maid = Utils.CreateMaid()
 local WeightUpdated = Utils.CreateRemoteEvent("WeightUpdated")
 local PickupEffect = Utils.CreateRemoteEvent("PickupEffect")
 local SanityChanged = Utils.CreateRemoteEvent("SanityChanged")
-local LobbyReady = Utils.CreateRemoteEvent("LobbyReady")  -- NEW for LobbyManager
+local ExtractionSuccess = Utils.CreateRemoteEvent("ExtractionSuccess")
+local LobbyReady = Utils.CreateRemoteEvent("LobbyReady")
+local LobbyCountdown = Utils.CreateRemoteEvent("LobbyCountdown")
 
 -- ScreenGui
 local screenGui = Instance.new("ScreenGui")
@@ -171,14 +173,25 @@ readyButton.MouseButton1Click:Connect(function()
 	readyButton.BackgroundColor3 = isReady and Color3.fromRGB(0, 100, 0) or Color3.fromRGB(0, 180, 80)
 	readyButton.Text = isReady and "READY (Waiting...)" or "READY (Foosha Village)"
 	LobbyReady:FireServer(isReady)
-end))
+end)
 
 -- Remote Handlers
+maid:GiveTask(LobbyCountdown.OnClientEvent:Connect(function(seconds: number)
+	if seconds > 0 then
+		readyButton.Text = `STARTING IN {seconds}...`
+		readyButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+	else
+		readyButton.Text = "DEPLOYING!"
+		readyButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+	end
+end))
+
 maid:GiveTask(WeightUpdated.OnClientEvent:Connect(function(newWeight: number, valueGained: number?)
-	currentWeight = newWeight
-	if valueGained then
+	currentWeight = newWeight or 0
+	if valueGained and valueGained > 0 then
 		local fb = getFeedbackLabel()
 		fb.Text = `+{valueGained}G`
+		fb.TextColor3 = Color3.fromRGB(0, 255, 120)
 		fb.Position = UDim2.new(0.5, math.random(-90, 90), 0.45, 0)
 		local tween = TweenService:Create(fb, TweenInfo.new(1.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
 			Position = fb.Position + UDim2.new(0, 0, -0.28, 0),
@@ -190,7 +203,7 @@ maid:GiveTask(WeightUpdated.OnClientEvent:Connect(function(newWeight: number, va
 end))
 
 maid:GiveTask(SanityChanged.OnClientEvent:Connect(function(s: number)
-	currentSanity = math.clamp(s, 0, 100)
+	currentSanity = math.clamp(s or 100, 0, 100)
 end))
 
 maid:GiveTask(PickupEffect.OnClientEvent:Connect(function(status: string)
@@ -202,12 +215,26 @@ maid:GiveTask(PickupEffect.OnClientEvent:Connect(function(status: string)
 	end
 end))
 
+maid:GiveTask(ExtractionSuccess.OnClientEvent:Connect(function(amount: number)
+	if not amount or amount <= 0 then return end
+	local fb = getFeedbackLabel()
+	fb.Text = `TOLL PAID: +{amount}G`
+	fb.TextColor3 = Color3.fromRGB(0, 255, 255)
+	fb.Position = UDim2.new(0.5, 0, 0.4, 0)
+	local tween = TweenService:Create(fb, TweenInfo.new(2.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Position = fb.Position + UDim2.new(0, 0, -0.4, 0),
+		TextTransparency = 1
+	})
+	tween:Play()
+	tween.Completed:Connect(function() recycleFeedback(fb) end)
+end))
+
 -- Tag Consumers
 maid:GiveTask(CollectionService:GetInstanceAddedSignal("LootChest"):Connect(onLootChestAdded))
 maid:GiveTask(CollectionService:GetInstanceAddedSignal("GhostShip"):Connect(onGhostShipAdded))
 
 -- Pre-warm pool
-for _ = 1, 10 do
+for _ = 1, 12 do
 	table.insert(feedbackPool, getFeedbackLabel())
 end
 
