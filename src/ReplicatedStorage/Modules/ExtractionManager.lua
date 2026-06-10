@@ -1,11 +1,9 @@
 --!strict
 -- ExtractionManager.lua (ReplicatedStorage/Modules)
--- Proximity-based extraction with weight penalties and quota integration.
--- No polling - distance checks on throttled Heartbeat.
+-- Fixed: CreateTestChest implementation, PlayerRemoving cleanup, type safety, rate limiting stub.
 
 local Utils = require(script.Parent.Utils)
 local ShipController = require(script.Parent.ShipController)
--- local RoundManager = require(script.Parent.Parent.ServerScriptService.RoundManager) -- REMOVED: ReplicatedStorage cannot require from ServerScriptService
 
 local CollectionService = Utils.GetService("CollectionService")
 local RunService = Utils.GetService("RunService")
@@ -20,7 +18,7 @@ local Remotes = {
 	ExtractionSuccess = Utils.CreateRemoteEvent("ExtractionSuccess"),
 }
 
-local activeChests: {[Model]: {Model: Model, Weight: number, Value: number, Ship: any, Maid: any}} = {}
+local activeChests: {[Model]: {Model: Model, Weight: number, Value: number, Maid: any}} = {}
 local playerWeight: {[Player]: number} = {}
 local playerValue: {[Player]: number} = {}
 local chestPool: {Model} = {}
@@ -33,6 +31,7 @@ local CONFIG = {
 	SpeedPenaltyMultiplier = 0.68,
 	JumpPenaltyMultiplier = 0.75,
 	ExtractionRadius = 28,
+	PickupCooldown = 0.8,
 }
 
 local function createChestModel(): Model
@@ -63,29 +62,28 @@ local function returnToPool(model: Model)
 	end
 end
 
-function ExtractionManager.RegisterChest(chestModel: Model, weight: number, value: number)
-	if not activeChests[chestModel] then
-		activeChests[chestModel] = {
-			Model = chestModel,
-			Weight = weight or CONFIG.BaseWeight,
-			Value = value or math.random(50, 250),
-			Maid = Utils.CreateMaid()
-		}
-		
-		-- Add proximity prompt for pickup
-		local root = chestModel.PrimaryPart
-		if root then
-			local prompt = Instance.new("ProximityPrompt")
-			prompt.ActionText = "Scavenge Cursed Treasure"
-			prompt.ObjectText = "Cursed Chest"
-			prompt.HoldDuration = 1.2
-			prompt.MaxActivationDistance = 12
-			prompt.Parent = root
-			
-			activeChests[chestModel].Maid:GiveTask(prompt.Triggered:Connect(function(player)
-				ExtractionManager.HandlePickup(player, chestModel)
-			end))
-		end
+function ExtractionManager.RegisterChest(chestModel: Model, weight: number?, value: number?)
+	if activeChests[chestModel] then return end
+
+	activeChests[chestModel] = {
+		Model = chestModel,
+		Weight = weight or CONFIG.BaseWeight,
+		Value = value or math.random(50, 250),
+		Maid = Utils.CreateMaid()
+	}
+
+	local root = chestModel.PrimaryPart
+	if root then
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.ActionText = "Scavenge Cursed Treasure"
+		prompt.ObjectText = "Cursed Chest"
+		prompt.HoldDuration = 1.2
+		prompt.MaxActivationDistance = 12
+		prompt.Parent = root
+
+		activeChests[chestModel].Maid:GiveTask(prompt.Triggered:Connect(function(player: Player)
+			ExtractionManager.HandlePickup(player, chestModel)
+		end))
 	end
 end
 
@@ -99,16 +97,15 @@ function ExtractionManager.HandlePickup(player: Player, chestModel: Model)
 		return
 	end
 
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: Part?
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not root or (root.Position - chest.Model.PrimaryPart.Position).Magnitude > 18 then
 		return
 	end
 
 	playerWeight[player] = current + chest.Weight
 	playerValue[player] = (playerValue[player] or 0) + chest.Value
-	
+
 	ShipController.UpdatePlayerWeight(player, playerWeight[player])
-	
 	Remotes.WeightUpdated:FireClient(player, playerWeight[player], playerValue[player])
 	Remotes.PickupEffect:FireClient(player, "Success", chest.Value)
 
@@ -132,13 +129,13 @@ function ExtractionManager.ExtractAtZone(player: Player, zonePos: Vector3, radiu
 		Remotes.ExtractionSuccess:FireClient(player, value)
 		print(`[ExtractionManager] {player.Name} extracted {value} loot!`)
 	end
-	
 	return value
 end
 
 function ExtractionManager.Initialize()
-	globalMaid:GiveTask(Players.PlayerRemoving:Connect(function(player)
+	globalMaid:GiveTask(Players.PlayerRemoving:Connect(function(player: Player)
 		playerWeight[player] = nil
+		playerValue[player] = nil
 	end))
 
 	print("[ExtractionManager] Initialized - Proximity extraction ready")
@@ -152,11 +149,16 @@ function ExtractionManager.Destroy()
 	end
 	table.clear(activeChests)
 	table.clear(playerWeight)
+	table.clear(playerValue)
 	table.clear(chestPool)
 end
 
-function ExtractionManager.CreateTestChest(ship: any)
-	-- Implementation in GhostShipGenerator now
+-- Fixed: Proper test chest creation
+function ExtractionManager.CreateTestChest(ship: Model)
+	local chest = createChestModel()
+	chest.Parent = ship
+	ExtractionManager.RegisterChest(chest, CONFIG.BaseWeight * 1.5, 150)
+	return chest
 end
 
 function ExtractionManager.GetPlayerWeight(player: Player): number

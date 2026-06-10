@@ -1,7 +1,7 @@
 --!strict
 -- LobbyManager.lua (ServerScriptService)
--- Handles Foosha Village lobby, player ready-up, 10s countdown, then spawns to Windmill Village.
--- Integrates with RoundManager + GameManager.
+-- Handles Foosha Village lobby, ready-up, non-blocking countdown, and game transition.
+-- Fixed: Non-blocking timer via Heartbeat, type validation on remote, teleport safety.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
 
@@ -10,31 +10,35 @@ local RunService = Utils.GetService("RunService")
 local CollectionService = Utils.GetService("CollectionService")
 
 local LobbyManager = {}
-
-local MIN_PLAYERS = 1 -- Changed to 1 for easier testing, but can be 2
+local MIN_PLAYERS = 1
 local MAX_PLAYERS = 6
 local COUNTDOWN_TIME = 10
 
-local lobbySpawns = {}  -- Tagged "LobbySpawn"
-local gameSpawns = {}   -- Tagged "GameSpawn"
+local lobbySpawns = {} -- Tagged "LobbySpawn"
+local gameSpawns = {} -- Tagged "GameSpawn"
 
 local isInLobby = true
 local countdownActive = false
 local readyPlayers: {[Player]: boolean} = {}
+local countdownStartTime = 0
 
 local maid = Utils.CreateMaid()
+
 local CountdownRemote = Utils.CreateRemoteEvent("LobbyCountdown")
 local LobbyReadyRemote = Utils.CreateRemoteEvent("LobbyReady")
 
 function LobbyManager.Initialize()
-	-- Find spawns
 	lobbySpawns = CollectionService:GetTagged("LobbySpawn")
 	gameSpawns = CollectionService:GetTagged("GameSpawn")
 
 	Players.PlayerAdded:Connect(LobbyManager.OnPlayerAdded)
 	Players.PlayerRemoving:Connect(LobbyManager.OnPlayerRemoving)
-	
-	LobbyReadyRemote.OnServerEvent:Connect(function(player, isReady)
+
+	LobbyReadyRemote.OnServerEvent:Connect(function(player: Player, isReady: any)
+		-- Security: Type validation (audit P1)
+		if typeof(isReady) ~= "boolean" then
+			return
+		end
 		LobbyManager.SetReady(player, isReady)
 	end)
 
@@ -42,13 +46,14 @@ function LobbyManager.Initialize()
 end
 
 function LobbyManager.OnPlayerAdded(player: Player)
-	player.CharacterAdded:Connect(function(char)
-		task.wait(1)
-		if isInLobby then
-			LobbyManager.TeleportToLobby(player)
-		else
-			LobbyManager.TeleportToGame(player)
-		end
+	player.CharacterAdded:Connect(function(char: Model)
+		task.defer(function() -- Non-blocking character load safety
+			if isInLobby then
+				LobbyManager.TeleportToLobby(player)
+			else
+				LobbyManager.TeleportToGame(player)
+			end
+		end)
 	end)
 end
 
@@ -58,12 +63,16 @@ function LobbyManager.OnPlayerRemoving(player: Player)
 end
 
 function LobbyManager.TeleportToLobby(player: Player)
-	if #lobbySpawns > 0 then
-		local spawn = lobbySpawns[math.random(1, #lobbySpawns)]
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-		if root and spawn then
-			root.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
-		end
+	if #lobbySpawns == 0 then return end
+	local spawn = lobbySpawns[math.random(1, #lobbySpawns)]
+	local char = player.Character
+	if not char then return end
+	local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root and spawn then
+		root.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
+		-- Physics hardening (best practice)
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
 	end
 end
 
@@ -73,50 +82,64 @@ function LobbyManager.SetReady(player: Player, isReady: boolean)
 end
 
 function LobbyManager.CheckStartCondition()
+	if countdownActive or not isInLobby then return end
+
 	local readyCount = 0
 	for _, ready in readyPlayers do
 		if ready then readyCount += 1 end
 	end
 
 	local totalPlayers = #Players:GetPlayers()
-
-	if totalPlayers >= MIN_PLAYERS and readyCount >= MIN_PLAYERS and not countdownActive and isInLobby then
+	if totalPlayers >= MIN_PLAYERS and readyCount >= MIN_PLAYERS then
 		LobbyManager.StartCountdown()
 	end
 end
 
+-- Non-blocking countdown (Roblox-recommended pattern)
 function LobbyManager.StartCountdown()
 	countdownActive = true
+	countdownStartTime = os.clock()
 	print("[LobbyManager] Starting 10s countdown to Windmill Village...")
 
-	for i = COUNTDOWN_TIME, 0, -1 do
-		CountdownRemote:FireAllClients(i)
-		task.wait(1)
-		if not isInLobby then break end -- Stop if round started early or cancelled
-	end
+	maid:GiveTask(RunService.Heartbeat:Connect(function()
+		local elapsed = os.clock() - countdownStartTime
+		local remaining = math.max(0, COUNTDOWN_TIME - math.floor(elapsed))
 
-	if isInLobby then
-		-- Transition to game
-		isInLobby = false
-		local RoundManager = require(script.Parent.RoundManager)
-		RoundManager.StartRound()
+		CountdownRemote:FireAllClients(remaining)
 
-		for _, player in Players:GetPlayers() do
-			LobbyManager.TeleportToGame(player)
+		if remaining <= 0 then
+			LobbyManager.FinishCountdown()
 		end
+	end))
+end
 
-		print("[LobbyManager] Round started - Players teleported to Windmill Village")
+function LobbyManager.FinishCountdown()
+	maid:DoCleaning() -- Stop countdown Heartbeat
+
+	if not isInLobby then return end
+
+	isInLobby = false
+	local RoundManager = require(script.Parent.RoundManager)
+	RoundManager.StartRound()
+
+	for _, player in Players:GetPlayers() do
+		LobbyManager.TeleportToGame(player)
 	end
+
+	print("[LobbyManager] Round started - Players teleported to Windmill Village")
 	countdownActive = false
 end
 
 function LobbyManager.TeleportToGame(player: Player)
-	if #gameSpawns > 0 then
-		local spawn = gameSpawns[math.random(1, #gameSpawns)]
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-		if root and spawn then
-			root.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
-		end
+	if #gameSpawns == 0 then return end
+	local spawn = gameSpawns[math.random(1, #gameSpawns)]
+	local char = player.Character
+	if not char then return end
+	local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root and spawn then
+		root.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
 	end
 end
 

@@ -1,18 +1,16 @@
 --!strict
 -- ClientInit.lua (StarterPlayer/StarterPlayerScripts)
--- Single source of truth for client bootstrapping.
--- Added ClientMistController for closing green Smothering Mist visuals.
+-- Single source of truth for client bootstrapping. Fixed double-init ordering.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
-local maid = Utils.CreateMaid()  -- Global maid for any shared cleanup if needed
 
 local ClientInit = {
 	Controllers = {
-		UI     = require(script.Parent.Controllers.ClientUIController),
-		Ship   = require(script.Parent.Controllers.ClientShipController),
+		UI = require(script.Parent.Controllers.ClientUIController),
+		Ship = require(script.Parent.Controllers.ClientShipController),
 		Combat = require(script.Parent.Controllers.ClientCombatController),
 		Horror = require(script.Parent.Controllers.ClientHorrorController),
-		Mist   = require(script.Parent.Controllers.ClientMistController),  -- NEW: Closing circle mist
+		Mist = require(script.Parent.Controllers.ClientMistController),
 	}
 }
 
@@ -39,7 +37,5 @@ function ClientInit.Initialize()
 	end
 end
 
--- Ensure single execution
-ClientInit.Initialize()
-
+-- Single execution point (removed self-call at bottom)
 return ClientInit

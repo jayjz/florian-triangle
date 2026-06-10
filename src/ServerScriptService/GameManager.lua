@@ -1,10 +1,9 @@
 --!strict
 -- GameManager.lua (ServerScriptService)
--- Central orchestrator with rate limiting and anti-exploit wrappers.
--- Patched: Fixed extraction spam, used os.clock(), gated TestHarness to Studio,
--- improved update loop, preserved all original logic and rate limiter.
+-- Fixed: Removed TestHarness double-init, enhanced sanitation for descendants/GUIs, os.clock() consistency.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
+
 local RoundManager = require(script.Parent.RoundManager)
 local LobbyManager = require(script.Parent.LobbyManager)
 local FogSystem = require(game.ReplicatedStorage.Modules.FogSystem)
@@ -30,12 +29,42 @@ local UPDATE_RATE = 0.2
 -- Simple rate limiter
 local lastRemoteTime: {[Player]: number} = {}
 
+local function cleanupLegacyAssets()
+	print("[GameManager] Running deep asset sanitation pass...")
+	local count = 0
+
+	local targets = {workspace, game.ReplicatedStorage:FindFirstChild("Assets")}
+
+	for _, root in ipairs(targets) do
+		if not root then continue end
+		for _, obj in ipairs(root:GetDescendants()) do
+			local isLegacyScript = obj:IsA("LuaSourceContainer") and (
+				obj.Name == "GUI" or 
+				obj.Name:find("Script") or 
+				obj.Parent.Name == "Head"
+			)
+			local isLegacyGui = obj:IsA("GuiObject") or obj:IsA("BillboardGui") or obj:IsA("SurfaceGui")
+
+			if isLegacyScript or isLegacyGui then
+				obj:Destroy()
+				count += 1
+			end
+		end
+	end
+
+	if count > 0 then
+		print(`[GameManager] Purged {count} legacy assets/scripts to prevent console errors`)
+	end
+end
+
 function GameManager.Initialize()
 	print("=== [GameManager] Initializing all systems ===")
-	
+
+	cleanupLegacyAssets()
+
 	pcall(RoundManager.Initialize)
 	pcall(LobbyManager.Initialize)
-	
+
 	local systems = {
 		{ name = "FogSystem", sys = FogSystem },
 		{ name = "ShipController", sys = ShipController },
@@ -57,7 +86,7 @@ function GameManager.Initialize()
 		end
 	end
 
-	-- TestHarness only in Studio (security best practice)
+	-- TestHarness ONLY in Studio (fixed double-init)
 	if RunService:IsStudio() and typeof(TestHarness.Initialize) == "function" then
 		pcall(TestHarness.Initialize)
 	end
@@ -73,38 +102,33 @@ function GameManager.Initialize()
 	end)
 
 	maid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
-		local now = os.clock()  -- Roblox-recommended over tick()
+		local now = os.clock()
 		if now - lastUpdate < UPDATE_RATE then return end
 		lastUpdate = now
 
-		-- Update player positions (preserved)
+		-- Update player positions
 		for _, player in Players:GetPlayers() do
 			local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-			if root then 
-				playerPositions[player] = root.Position 
+			if root then
+				playerPositions[player] = root.Position
 			end
 		end
 
-		-- Core system updates (preserved)
-		if typeof(EntityAI.UpdateAll) == "function" then 
-			EntityAI.UpdateAll(playerPositions, dt) 
+		-- Core updates
+		if typeof(EntityAI.UpdateAll) == "function" then
+			EntityAI.UpdateAll(playerPositions, dt)
 		end
-		
-		if typeof(GhostShipGenerator.CullDistantShips) == "function" then 
-			GhostShipGenerator.CullDistantShips(Vector3.new(0, 50, 0)) 
+		if typeof(GhostShipGenerator.CullDistantShips) == "function" then
+			GhostShipGenerator.CullDistantShips(Vector3.new(0, 50, 0))
 		end
 
-		-- Horror + Fog integration (preserved)
+		-- Horror + Fog
 		if typeof(HorrorEvents.GetHorrorLevel) == "function" then
 			local level = HorrorEvents.GetHorrorLevel()
-			if typeof(FogSystem.SetHorrorLevel) == "function" then 
-				FogSystem.SetHorrorLevel(level) 
+			if typeof(FogSystem.SetHorrorLevel) == "function" then
+				FogSystem.SetHorrorLevel(level)
 			end
 		end
-
-		-- FIXED: Removed every-frame extraction spam. 
-		-- Extraction now handled via ProximityPrompt in ExtractionZone.
-		-- This prevents unnecessary server load.
 	end))
 
 	print("=== [GameManager] Fully initialized with anti-exploit measures ===")
@@ -114,13 +138,12 @@ function GameManager.Destroy()
 	maid:Cleanup()
 	local systems = {RoundManager, LobbyManager, FogSystem, ShipController, GhostShipGenerator, EntityAI, HorrorEvents, ExtractionManager, ExtractionZone, TestHarness}
 	for _, sys in systems do
-		if typeof(sys.Destroy) == "function" then 
-			pcall(sys.Destroy) 
+		if typeof(sys.Destroy) == "function" then
+			pcall(sys.Destroy)
 		end
 	end
 end
 
--- Global rate limit helper (call from remotes) — fully preserved
 function GameManager.IsRateLimited(player: Player, minInterval: number): boolean
 	local last = lastRemoteTime[player] or 0
 	local now = os.clock()

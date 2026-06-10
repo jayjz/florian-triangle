@@ -1,6 +1,6 @@
 --!strict
 -- ShipController.lua (ReplicatedStorage/Modules)
--- Client-authoritative sailing with server validation, rate limiting, and strong weight penalties.
+-- Fixed: os.clock(), guarded calls to HorrorEvents/AudioManager, improved docking.
 
 local Utils = require(script.Parent.Utils)
 local FogSystem = require(script.Parent.FogSystem)
@@ -27,16 +27,15 @@ local CONFIG = {
 	Acceleration = 34,
 	TurnRate = 4.0,
 	DockingDistance = 32,
-	BaseWeightPenalty = 0.78,  -- Strong "crawl" feel at max weight
-	InputRateLimit = 0.08,     -- Anti-spam (seconds)
-	MaxInputMagnitude = 1.2,   -- Prevent speed hacks
+	BaseWeightPenalty = 0.78,
+	InputRateLimit = 0.08,
+	MaxInputMagnitude = 1.2,
 }
 
--- Rate limiter per player
 local function isInputAllowed(player: Player): boolean
 	local ship = activeShips[player]
 	if not ship then return true end
-	return (tick() - (ship.LastInputTime or 0)) > CONFIG.InputRateLimit
+	return (os.clock() - (ship.LastInputTime or 0)) > CONFIG.InputRateLimit
 end
 
 function ShipController.Initialize()
@@ -54,7 +53,7 @@ function ShipController.Initialize()
 	Remotes.PlayerMoveInput.OnServerEvent:Connect(function(player: Player, moveDir: Vector3?)
 		if typeof(moveDir) ~= "Vector3" then return end
 		if not isInputAllowed(player) then return end
-		if moveDir.Magnitude > CONFIG.MaxInputMagnitude then return end  -- Anti-exploit
+		if moveDir.Magnitude > CONFIG.MaxInputMagnitude then return end
 
 		if not activeShips[player] then
 			activeShips[player] = {Velocity = Vector3.new(), LastDockTime = 0, Weight = 0, LastInputTime = 0}
@@ -66,7 +65,7 @@ function ShipController.Initialize()
 			targetVelocity = moveDir.Unit * CONFIG.MaxSpeed
 		end
 		ship.Velocity = ship.Velocity:Lerp(targetVelocity, 0.38)
-		ship.LastInputTime = tick()
+		ship.LastInputTime = os.clock()
 	end)
 
 	print("[ShipController] Initialized - Secure sailing active")
@@ -81,7 +80,7 @@ end
 
 function ShipController.AttemptDock(player: Player)
 	local ship = activeShips[player]
-	if not ship or tick() - ship.LastDockTime < 2.2 then return end
+	if not ship or (os.clock() - ship.LastDockTime) < 2.2 then return end
 
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not root then return end
@@ -89,14 +88,21 @@ function ShipController.AttemptDock(player: Player)
 	for _, ghost in CollectionService:GetTagged("GhostShip") do
 		local primary = ghost.PrimaryPart
 		if primary and (primary.Position - root.Position).Magnitude < CONFIG.DockingDistance then
-			ship.LastDockTime = tick()
-			
-			-- Boarding effects
+			ship.LastDockTime = os.clock()
+
 			Remotes.PlayerDocked:FireClient(player, ghost)
-			AudioManager.PlayBoardingSound(ghost)
-			HorrorEvents.TriggerSanityDamage(player, 12) -- Mental shock of boarding a haunted ship
-			HorrorEvents.TriggerHorrorPulse(0.8)
 			
+			-- Guarded calls (prevents nil errors)
+			if typeof(AudioManager.PlayBoardingSound) == "function" then
+				AudioManager.PlayBoardingSound(ghost)
+			end
+			if typeof(HorrorEvents.TriggerSanityDamage) == "function" then
+				HorrorEvents.TriggerSanityDamage(player, 12)
+			end
+			if typeof(HorrorEvents.TriggerHorrorPulse) == "function" then
+				HorrorEvents.TriggerHorrorPulse(0.8)
+			end
+
 			return true
 		end
 	end
