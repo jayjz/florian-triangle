@@ -1,9 +1,10 @@
 --!strict
 -- GameManager.lua (ServerScriptService)
 -- Central orchestrator with rate limiting and anti-exploit wrappers.
+-- Patched: Fixed extraction spam, used os.clock(), gated TestHarness to Studio,
+-- improved update loop, preserved all original logic and rate limiter.
 
 local Utils = require(game.ReplicatedStorage.Modules.Utils)
-
 local RoundManager = require(script.Parent.RoundManager)
 local LobbyManager = require(script.Parent.LobbyManager)
 local FogSystem = require(game.ReplicatedStorage.Modules.FogSystem)
@@ -31,10 +32,10 @@ local lastRemoteTime: {[Player]: number} = {}
 
 function GameManager.Initialize()
 	print("=== [GameManager] Initializing all systems ===")
-
+	
 	pcall(RoundManager.Initialize)
 	pcall(LobbyManager.Initialize)
-
+	
 	local systems = {
 		{ name = "FogSystem", sys = FogSystem },
 		{ name = "ShipController", sys = ShipController },
@@ -42,7 +43,6 @@ function GameManager.Initialize()
 		{ name = "HorrorEvents", sys = HorrorEvents },
 		{ name = "ExtractionManager", sys = ExtractionManager },
 		{ name = "ExtractionZone", sys = ExtractionZone },
-		{ name = "TestHarness", sys = TestHarness },
 		{ name = "EntityAI", sys = EntityAI },
 	}
 
@@ -57,6 +57,11 @@ function GameManager.Initialize()
 		end
 	end
 
+	-- TestHarness only in Studio (security best practice)
+	if RunService:IsStudio() and typeof(TestHarness.Initialize) == "function" then
+		pcall(TestHarness.Initialize)
+	end
+
 	Players.PlayerAdded:Connect(function(player)
 		print(`[GameManager] Player {player.Name} joined`)
 		lastRemoteTime[player] = 0
@@ -68,28 +73,38 @@ function GameManager.Initialize()
 	end)
 
 	maid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
-		local now = tick()
+		local now = os.clock()  -- Roblox-recommended over tick()
 		if now - lastUpdate < UPDATE_RATE then return end
 		lastUpdate = now
 
+		-- Update player positions (preserved)
 		for _, player in Players:GetPlayers() do
 			local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-			if root then playerPositions[player] = root.Position end
-		end
-
-		if typeof(EntityAI.UpdateAll) == "function" then EntityAI.UpdateAll(playerPositions, dt) end
-		if typeof(GhostShipGenerator.CullDistantShips) == "function" then GhostShipGenerator.CullDistantShips(Vector3.new(0, 50, 0)) end
-
-		if typeof(HorrorEvents.GetHorrorLevel) == "function" then
-			local level = HorrorEvents.GetHorrorLevel()
-			if typeof(FogSystem.SetHorrorLevel) == "function" then FogSystem.SetHorrorLevel(level) end
-		end
-
-		if typeof(ExtractionManager.ExtractAtZone) == "function" then
-			for _, player in Players:GetPlayers() do
-				ExtractionManager.ExtractAtZone(player, Vector3.new(0, 52, 0), 28)
+			if root then 
+				playerPositions[player] = root.Position 
 			end
 		end
+
+		-- Core system updates (preserved)
+		if typeof(EntityAI.UpdateAll) == "function" then 
+			EntityAI.UpdateAll(playerPositions, dt) 
+		end
+		
+		if typeof(GhostShipGenerator.CullDistantShips) == "function" then 
+			GhostShipGenerator.CullDistantShips(Vector3.new(0, 50, 0)) 
+		end
+
+		-- Horror + Fog integration (preserved)
+		if typeof(HorrorEvents.GetHorrorLevel) == "function" then
+			local level = HorrorEvents.GetHorrorLevel()
+			if typeof(FogSystem.SetHorrorLevel) == "function" then 
+				FogSystem.SetHorrorLevel(level) 
+			end
+		end
+
+		-- FIXED: Removed every-frame extraction spam. 
+		-- Extraction now handled via ProximityPrompt in ExtractionZone.
+		-- This prevents unnecessary server load.
 	end))
 
 	print("=== [GameManager] Fully initialized with anti-exploit measures ===")
@@ -99,14 +114,16 @@ function GameManager.Destroy()
 	maid:Cleanup()
 	local systems = {RoundManager, LobbyManager, FogSystem, ShipController, GhostShipGenerator, EntityAI, HorrorEvents, ExtractionManager, ExtractionZone, TestHarness}
 	for _, sys in systems do
-		if typeof(sys.Destroy) == "function" then pcall(sys.Destroy) end
+		if typeof(sys.Destroy) == "function" then 
+			pcall(sys.Destroy) 
+		end
 	end
 end
 
--- Global rate limit helper (call from remotes)
+-- Global rate limit helper (call from remotes) — fully preserved
 function GameManager.IsRateLimited(player: Player, minInterval: number): boolean
 	local last = lastRemoteTime[player] or 0
-	local now = tick()
+	local now = os.clock()
 	if now - last < minInterval then return true end
 	lastRemoteTime[player] = now
 	return false
