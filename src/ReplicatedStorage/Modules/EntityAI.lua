@@ -245,11 +245,15 @@ end
 
 function EntityAI.Destroy()
     globalMaid:Cleanup()
-    for _, entity in activeEntities do
+    -- Copy list before cleanup — entity.Maid:Cleanup() removes from
+    -- activeEntities, which corrupts iteration if done in-place.
+    -- (Lua: never modify table while iterating with generic for)
+    local toDestroy = table.clone(activeEntities)
+    table.clear(activeEntities)
+    for _, entity in toDestroy do
         if entity.Maid then entity.Maid:Cleanup() end
         if entity.Model then entity.Model:Destroy() end
     end
-    table.clear(activeEntities)
 end
 
 return EntityAI
