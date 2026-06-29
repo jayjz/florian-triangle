@@ -1,0 +1,27 @@
+# Progress
+
+## 2026-06-29 — Repo Audit (Architect pass)
+
+**Branch:** `agent/autonomous-florian-triangle` @ origin/dev base
+**Audit scope:** Full `src/` tree, PROJECT-ROADMAP.md, MEMORY.md, CONTEXT.md, lua-best-practices.md
+
+### What's Good
+- FogSystem P0 fix is in (nil guards, horrorLevel from GameManager, 30Hz throttle)
+- Client tag consumers ARE wired — `ClientShipController` is required in `ClientInit.lua`, contrary to PROJECT-ROADMAP note from June 8
+- Rojo structure is correct (`default.project.json` with DataModel root)
+- ExtractionManager → ShipController.UpdatePlayerWeight integration works
+- Server authority patterns followed, Maid cleanup everywhere, --!strict throughout
+- GameManager pcall-wraps all system Initialize() calls
+
+### What's Broken
+- **P0: `ShipController.SetSailing()` missing.** `GhostShipGenerator.lua:111` and `:171` call it on board/exit. Will error at runtime, blocking core loop. This is the immediate blocker.
+- `ShipController.AttemptDock()` exists but is never called (boarding is ProximityPrompt-driven in GhostShipGenerator, bypassing it)
+- `TestHarness.Initialize()` is called in BOTH `ServerMain.server.lua` AND `GameManager.Initialize()` — double-init guard exists but still sloppy
+- No real asset rigs in `ServerStorage/Assets` — procedural fallback only
+- No automated tests, no CI
+
+### Next Step
+Fix `ShipController.SetSailing(player, enabled)` — smallest safe change that unblocks boarding/playtesting. See IMPLEMENTATION_PLAN.md.
+
+### Self-Review
+Audit honest, no scope creep. One P0 bug identified with exact file/line numbers. Proposed fix is surgical (one function, ~15 LOC).
