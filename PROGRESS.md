@@ -25,3 +25,34 @@ Fix `ShipController.SetSailing(player, enabled)` — smallest safe change that u
 
 ### Self-Review
 Audit honest, no scope creep. One P0 bug identified with exact file/line numbers. Proposed fix is surgical (one function, ~15 LOC).
+
+---
+
+## 2026-06-29 — ShipController.SetSailing Fix (Implemented)
+
+**Commit:** `ab648ab` — `fix(ship): add missing SetSailing API for ghost ship boarding`
+
+**What was done:**
+- Added `ShipController.SetSailing(player: Player, enabled: boolean)` — unblocks GhostShipGenerator board/exit at L111/L171
+- Added `SailingEnabled: boolean` to `ShipState` type with proper --!strict typing
+- Movement input now rejected when `SailingEnabled == false`
+- Heartbeat velocity application zeros out when not sailing (prevents drift)
+- Refactored ship state creation into `getOrCreateShip(player)` helper — eliminates duplication, ensures consistent defaults
+- Velocity is zeroed immediately on `SetSailing(player, false)` to freeze the player
+
+**What worked:**
+- Clean --!strict types throughout, no anys
+- Small surgical diff: 1 file, +41 / -7, all in ShipController.lua
+- Maintains server authority, no client trust issues
+- Consistent with existing Maid / Utils patterns
+
+**What didn't / known gaps:**
+- `ShipController.AttemptDock()` still exists but is unused (boarding is ProximityPrompt-driven in GhostShipGenerator) — left intact for future wiring, not in scope for this fix
+- No automated test coverage — validated by code review only, needs Rojo/Studio playtest
+- `TestHarness.Initialize()` double-call (ServerMain + GameManager) still present — out of scope, guard prevents crash
+- No real asset rigs yet
+
+**Next step:**
+Rojo/Studio playtest full extraction loop (board ghost ship → loot → exit → extract), or tackle next smallest bug from audit list (TestHarness double-init cleanup).
+
+**Reviewer notes:** See REVIEW below.
