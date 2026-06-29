@@ -1,0 +1,102 @@
+# Selene config for florian-triangle
+# https://kampfkarren.github.io/selene/
+# Roblox Luau linting — catches undefined globals, deprecated APIs, shadowing, etc.
+
+std = "roblox"
+
+# Exclude generated / asset folders, test output
+exclude = {
+    "assets/**",
+    "sourcemap.json",
+    "default.project.json",
+}
+
+[project]
+# Tell Selene where to find the Rojo project for instance tree resolution
+# This helps it understand ReplicatedStorage.Modules.* requires
+# If rojo is not available in CI, Selene still runs with basic roblox std
+# project = "default.project.json"
+
+# Require --!strict equivalent type checking awareness
+# (Selene is a linter, not a type checker — Luau analyze handles types)
+# We rely on --!strict in source files + CI type checking separately
+
+[[project.requirements]]
+# Allow require() with common Roblox patterns
+# Modules in ReplicatedStorage
+pattern = "ReplicatedStorage%.Modules%.[%w_]+"
+# Modules in ServerScriptService
+pattern = "script%.Parent%[?\"?[%w_]+\"?%]?"
+# Relative requires
+pattern = "script%.Parent"
+
+[lints]
+# ===== Correctness =====
+unscoped_variables = "warn"
+undefined_variable = "error"
+unused_variable = "warn"
+shadowing = "warn"
+
+# ===== Roblox / Luau best practices =====
+deprecated = "warn"  # catches tick(), wait(), spawn(), delay()
+manual_clone = "warn"
+manual_huge_range_formatting = "warn"
+unsuitable_network_types = "warn"
+
+# ===== Style / maintainability =====
+unnecessary_parentheses = "allow"
+mixed_table = "warn"
+manual_table_clone = "warn"
+manual_iterators = "allow"  # pairs/ipairs are fine in Luau, don't force strict iterators
+multiple_statements = "warn"
+parenthese_conditions = "allow"
+
+# Roblox-specific: allow some patterns common in Roblox code
+# that Selene normally warns about
+unbalanced_assignments = "warn"
+
+# ===== Disabled / noisy lints =====
+# The following are disabled because they're too noisy for
+# a fast-moving Roblox game codebase, or conflict with
+# established patterns in this project:
+
+# if_same_then_else / if_else_merge  — autofix changes control flow readability,
+# not worth the churn in a game codebase
+if_same_then_else = "allow"
+if_else_merge = "allow"
+
+# roblox_suspicious_reverse_loop — false positives on legitimate reverse iteration
+roblox_suspicious_reverse_loop = "allow"
+
+# divergent_names — too noisy with ModuleScript patterns (Module:Function naming)
+divergent_names = "allow"
+
+# unhandled_promises — not using promises in this codebase (using Maid + pcall)
+unhandled_promises = "allow"
+
+# empty_if — sometimes used intentionally for "reserved" branches
+empty_if = "allow"
+
+# roblox_incorrect_roact_usage — not using Roact
+roblox_incorrect_roact_usage = "allow"
+roblox_incorrect_color3_new_bounds = "allow"  # we use Color3.fromRGB, not .new with 0-255
+
+# ===== Per-file / per-pattern overrides =====
+# Allow tick() with a warning (not error) during migration period
+# TODO: eliminate all tick() calls — see BUG_AUDIT_2026-06-29.md Bug #6 / #24
+# Once tick() is fully migrated to os.clock(), change deprecated lint to "error"
+
+# Allow warn()/print() — this is a game, not a library,
+# debug output to console is expected and useful
+[lints.global_usage]
+# Allow common Roblox globals that Selene's roblox std may miss
+# depending on version
+allow = [
+    "workspace",
+    "game",
+    "script",
+    "tick",  # deprecated but still used in codebase — tracked in Bug #6, warn via `deprecated` lint above, don't double-report as undefined_global
+    "wait",  # same — deprecated, caught by `deprecated` lint
+    "spawn",
+    "delay",
+]
