@@ -93,6 +93,31 @@ function HorrorEvents.TriggerSanityDamage(player: Player, amount: number)
 	Remotes.SanityChanged:FireClient(player, math.floor(playerSanity[player]))
 end
 
+-- ApplySanityDrain: Continuous sanity drain (e.g., proximity aura from entities).
+-- Unlike TriggerSanityDamage which is for instant events, this is designed
+-- to be called frequently (every frame) with small amounts.
+-- Fires SanityChanged RemoteEvent only when floored sanity value changes
+-- to avoid network spam at high call frequencies.
+-- @param player: Player whose sanity to drain
+-- @param amount: Amount to drain (can be fractional, e.g. 6 * dt)
+-- @return number? new sanity level, or nil if player not tracked
+function HorrorEvents.ApplySanityDrain(player: Player, amount: number): number?
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then return nil end
+	local current = playerSanity[player]
+	if current == nil then return nil end
+	if typeof(amount) ~= "number" or amount <= 0 then return current end
+
+	local oldFloored = math.floor(current)
+	local newSanity = Utils.Clamp(current - amount, 0, 100)
+	playerSanity[player] = newSanity
+
+	local newFloored = math.floor(newSanity)
+	if newFloored ~= oldFloored then
+		Remotes.SanityChanged:FireClient(player, newFloored)
+	end
+	return newSanity
+end
+
 function HorrorEvents.TriggerHorrorPulse(intensity: number)
 	Remotes.HorrorPulse:FireAllClients(intensity)
 end
