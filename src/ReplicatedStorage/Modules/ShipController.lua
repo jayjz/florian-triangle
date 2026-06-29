@@ -3,6 +3,8 @@
 -- Player ship movement with weight-based speed penalties and boarding state management.
 
 local Utils = require(script.Parent.Utils)
+local AudioManager = require(script.Parent.AudioManager)
+local HorrorEvents = require(script.Parent.HorrorEvents)
 
 local RunService = Utils.GetService("RunService")
 
@@ -29,6 +31,8 @@ local CONFIG = {
 	BaseWeightPenalty = 0.78,
 	InputRateLimit = 0.08,
 	MaxInputMagnitude = 1.2,
+	BoardingSanityDamage = 12,
+	BoardingHorrorPulse = 0.8,
 }
 
 local function getOrCreateShip(player: Player): ShipState
@@ -90,9 +94,11 @@ function ShipController.UpdatePlayerWeight(player: Player, newWeight: number)
 	end
 end
 
--- SetSailing: Toggle player ship movement on/off (used by GhostShipGenerator for boarding).
+-- SetSailing: Toggle player ship movement on/off.
 -- enabled = false → freeze velocity, reject move input (player is inside ghost ship interior)
 -- enabled = true  → restore sailing (player exited back to open sea)
+-- Note: Prefer BoardGhostShip/ExitGhostShip for full boarding flow with FX.
+-- SetSailing is kept exported as a low-level primitive.
 function ShipController.SetSailing(player: Player, enabled: boolean)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then return end
 	local ship = getOrCreateShip(player)
@@ -100,6 +106,73 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 	if not enabled then
 		ship.Velocity = Vector3.new()
 	end
+end
+
+-- BoardGhostShip: Full boarding sequence with horror feedback.
+-- Freezes sailing, teleports player to interior, triggers sanity damage,
+-- horror pulse, boarding audio, and fires PlayerDocked RemoteEvent for client FX.
+-- Returns true on success, false if player/character invalid.
+function ShipController.BoardGhostShip(player: Player, ghostModel: Model, interiorCFrame: CFrame): boolean
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then return false end
+	if typeof(ghostModel) ~= "Instance" or not ghostModel:IsA("Model") then return false end
+	if typeof(interiorCFrame) ~= "CFrame" then return false end
+
+	local character = player.Character
+	if not character then return false end
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then return false end
+
+	-- Freeze ship movement
+	ShipController.SetSailing(player, false)
+
+	-- Teleport to interior
+	root.CFrame = interiorCFrame
+
+	-- Horror feedback chain (all guarded)
+	if typeof(AudioManager.PlayBoardingSound) == "function" then
+		local ok = pcall(AudioManager.PlayBoardingSound, ghostModel)
+		if not ok then warn("[ShipController] PlayBoardingSound failed") end
+	end
+
+	if typeof(HorrorEvents.TriggerSanityDamage) == "function" then
+		local ok = pcall(HorrorEvents.TriggerSanityDamage, player, CONFIG.BoardingSanityDamage)
+		if not ok then warn("[ShipController] TriggerSanityDamage failed") end
+	end
+
+	if typeof(HorrorEvents.TriggerHorrorPulse) == "function" then
+		local ok = pcall(HorrorEvents.TriggerHorrorPulse, CONFIG.BoardingHorrorPulse)
+		if not ok then warn("[ShipController] TriggerHorrorPulse failed") end
+	end
+
+	-- Fire client boarding FX event
+	local ok = pcall(function()
+		Remotes.PlayerDocked:FireClient(player, ghostModel)
+	end)
+	if not ok then
+		warn("[ShipController] PlayerDocked FireClient failed")
+	end
+
+	return true
+end
+
+-- ExitGhostShip: Restore sailing and teleport player back to exterior.
+-- Returns true on success, false if player/character invalid.
+function ShipController.ExitGhostShip(player: Player, returnCFrame: CFrame): boolean
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then return false end
+	if typeof(returnCFrame) ~= "CFrame" then return false end
+
+	local character = player.Character
+	if not character then return false end
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then return false end
+
+	-- Restore sailing
+	ShipController.SetSailing(player, true)
+
+	-- Teleport to exterior
+	root.CFrame = returnCFrame
+
+	return true
 end
 
 function ShipController.Destroy()

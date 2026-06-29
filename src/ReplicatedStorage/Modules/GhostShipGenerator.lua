@@ -106,11 +106,8 @@ local function createInterior(shipModel: Model)
 	exitPrompt.ObjectText = "Glowing Hatch"
 	exitPrompt.Parent = exitPart
 	exitPrompt.Triggered:Connect(function(player)
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		if root then
-			ShipController.SetSailing(player, true)
-			root.CFrame = shipModel.PrimaryPart.CFrame + Vector3.new(0, 12, 0)
-		end
+		local returnCFrame = shipModel.PrimaryPart.CFrame + Vector3.new(0, 12, 0)
+		ShipController.ExitGhostShip(player, returnCFrame)
 	end)
 	
 	interior.Parent = shipModel
@@ -164,12 +161,11 @@ function GhostShipGenerator.CreateTestShip(pos: Vector3): {Model: Model}
 	boardingPrompt.HoldDuration = 0.5
 	boardingPrompt.Parent = hull
 	boardingPrompt.Triggered:Connect(function(player)
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		local interior = ship:FindFirstChild("Interior")
-		local floor = interior and interior:FindFirstChild("Part") :: BasePart?  -- Note: may need better floor reference
-		if root and floor then
-			ShipController.SetSailing(player, false)
-			root.CFrame = floor.CFrame + Vector3.new(0, 8, 0)
+		local floor = interior and interior:FindFirstChild("Part") :: BasePart?
+		if floor then
+			local interiorCFrame = floor.CFrame + Vector3.new(0, 8, 0)
+			ShipController.BoardGhostShip(player, ship, interiorCFrame)
 		end
 	end)
 	
