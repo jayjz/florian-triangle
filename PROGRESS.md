@@ -85,3 +85,35 @@ Rojo/Studio playtest full extraction loop (board ghost ship → loot → exit �
 Clean up dead `ShipController.AttemptDock()` or wire it to ProximityPrompt system, OR Rojo/Studio playtest full extraction loop. See PLAN.md.
 
 **Reviewer notes:** See REVIEW.md
+
+---
+
+## 2026-06-29 — Dead Code Cleanup: QuotaManager + AttemptDock (Implemented)
+
+**Commit:** caa279d
+
+**What was done:**
+- **Deleted `src/ReplicatedStorage/Modules/QuotaManager.lua`** — entire file, 34 LOC. Module was 100% unreferenced (`grep -r "QuotaManager" src/` = zero results). It was a duplicate/stub quota system conflicting with the real implementation in `RoundManager.lua`, which correctly handles extraction quota, win condition, RemoteEvent firing, and lobby return.
+- **Removed `ShipController.AttemptDock(player)`** — deleted ~35 LOC function from `ShipController.lua`. Function was exported but never called anywhere (`grep -rn "AttemptDock" src/` = zero results). Boarding is ProximityPrompt-driven in `GhostShipGenerator.lua` via `SetSailing()`, which is the correct path.
+- **Cleaned up dead dependencies in ShipController.lua** — removed unused requires: `FogSystem`, `AudioManager`, `HorrorEvents`, `Players`, `CollectionService`. Removed unused CONFIG fields: `Acceleration`, `TurnRate`, `DockingDistance`. Removed unused `ShipState.LastDockTime` field.
+- Total: ~70 LOC removed, 1 file deleted, 0 lines added. Zero runtime impact.
+
+**What worked:**
+- Pre-delete verification: `grep` confirmed zero external references for both QuotaManager and AttemptDock
+- Clean deletion — no other files needed changes, no broken imports
+- ShipController module is now tighter: only exports `Initialize`, `UpdatePlayerWeight`, `SetSailing`, `Destroy` — all actually used
+- Quota source of truth is now unambiguous: `RoundManager` only. No risk of split-brain quota bug from a future contributor accidentally wiring up the dead QuotaManager module
+- --!strict preserved, no type regressions
+- Follows lua-best-practices.md: "One class/responsibility per ModuleScript"
+
+**What didn't / known gaps:**
+- `PlayerDocked` RemoteEvent in ShipController is now orphaned — it was only ever fired from `AttemptDock()`, which is now deleted. The RemoteEvent is still declared (`Utils.CreateRemoteEvent("PlayerDocked")`) and `ClientShipController.lua` still listens to it (`Remotes.PlayerDocked.OnClientEvent`), but nothing on the server fires it anymore. This creates a dangling client listener that will never trigger ("Boarded ghost ship interior - horror intensified" message will never print).
+  - **Recommendation:** Either (A) wire `GhostShipGenerator` board/exit ProximityPrompts to fire `PlayerDocked` so the client gets boarding feedback, OR (B) delete `PlayerDocked` RemoteEvent from both ShipController and ClientShipController in a follow-up cleanup. Left intact in this commit to keep the change focused on the PLAN.md scope (delete QuotaManager + AttemptDock only).
+  - Left as a known issue, flagged in REVIEW.md
+- No Studio playtest — code review only (deletion, so low risk)
+- Still no real asset rigs, no automated tests
+
+**Next step:**
+Wire up Quota Progress HUD (add RemoteEvent for quota progress, update ClientUIController), OR clean up orphaned `PlayerDocked` RemoteEvent (server + client), OR Rojo/Studio playtest.
+
+**Reviewer notes:** See REVIEW.md
