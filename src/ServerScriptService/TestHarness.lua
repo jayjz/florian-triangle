@@ -20,6 +20,7 @@ export type DebugCommand = "spawnTestShip" | "spawnEntities" | "spawnChests" | "
 local testMaid = Utils.CreateMaid()
 local AdminDebugRemote = Utils.CreateRemoteEvent("AdminDebugCommand")
 local currentDifficulty = 1
+local initialized = false
 
 -- ============================================================
 -- INTERNAL SPAWNING HELPERS (DRY + Defensive)
@@ -134,6 +135,12 @@ end
 -- ============================================================
 
 function TestHarness.Initialize()
+    if initialized then
+        warn("[TestHarness] Already initialized — skipping duplicate")
+        return
+    end
+    initialized = true
+
     AdminDebugRemote.OnServerEvent:Connect(function(player: Player, command: DebugCommand, param: number?)
         executeDebugCommand(player, command, param)
     end)
@@ -158,6 +165,7 @@ end
 
 function TestHarness.Destroy()
     testMaid:Cleanup()
+    initialized = false
 end
 
 -- ============================================================
