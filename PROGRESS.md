@@ -55,4 +55,33 @@ Audit honest, no scope creep. One P0 bug identified with exact file/line numbers
 **Next step:**
 Rojo/Studio playtest full extraction loop (board ghost ship → loot → exit → extract), or tackle next smallest bug from audit list (TestHarness double-init cleanup).
 
-**Reviewer notes:** See REVIEW below.
+**Reviewer notes:** See REVIEW.md
+
+---
+
+## 2026-06-29 — TestHarness Double-Init Fix (Implemented)
+
+**Commit:** `edea063` — `fix(test): eliminate TestHarness double-init, add idempotency guard`
+
+**What was done:**
+- `ServerMain.server.lua`: Removed TestHarness require + Initialize() call entirely. ServerMain now bootstraps ONLY GameManager — single orchestrator pattern, matches architecture comment.
+- `TestHarness.lua`: Added `initialized` boolean guard at top of `Initialize()`, early return with warn on duplicate call. Matches `ClientInit.lua` pattern. `Destroy()` now resets `initialized = false` for clean shutdown.
+- GameManager keeps its `RunService:IsStudio()` guarded TestHarness init — this is now the single correct call site.
+
+**What worked:**
+- Clean separation of concerns: ServerMain = entry point → GameManager → all subsystems
+- Defense-in-depth: even if someone calls Initialize() twice in future, guard prevents double event connections
+- Small diff: 2 files, +14 / -10, debug tooling only, zero gameplay impact
+- Comments updated in ServerMain to reflect actual architecture
+- --!strict preserved, no type regressions
+
+**What didn't / known gaps:**
+- Still no automated test coverage / Studio playtest — code review only
+- `ShipController.AttemptDock()` still dead code — next candidate for cleanup
+- No real asset rigs in ServerStorage/Assets yet
+- Full co-op extraction playtest still pending (requires Roblox Studio / Windows)
+
+**Next step:**
+Clean up dead `ShipController.AttemptDock()` or wire it to ProximityPrompt system, OR Rojo/Studio playtest full extraction loop. See PLAN.md.
+
+**Reviewer notes:** See REVIEW.md
