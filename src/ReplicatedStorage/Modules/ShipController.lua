@@ -1,15 +1,10 @@
 --!strict
 -- ShipController.lua (ReplicatedStorage/Modules)
--- Fixed: os.clock(), guarded calls to HorrorEvents/AudioManager, improved docking.
+-- Player ship movement with weight-based speed penalties and boarding state management.
 
 local Utils = require(script.Parent.Utils)
-local FogSystem = require(script.Parent.FogSystem)
-local AudioManager = require(script.Parent.AudioManager)
-local HorrorEvents = require(script.Parent.HorrorEvents)
 
 local RunService = Utils.GetService("RunService")
-local Players = Utils.GetService("Players")
-local CollectionService = Utils.GetService("CollectionService")
 
 local ShipController = {}
 ShipController.__index = ShipController
@@ -21,7 +16,6 @@ local Remotes = {
 
 type ShipState = {
 	Velocity: Vector3,
-	LastDockTime: number,
 	Weight: number,
 	LastInputTime: number,
 	SailingEnabled: boolean,
@@ -32,9 +26,6 @@ local maid = Utils.CreateMaid()
 
 local CONFIG = {
 	MaxSpeed = 58,
-	Acceleration = 34,
-	TurnRate = 4.0,
-	DockingDistance = 32,
 	BaseWeightPenalty = 0.78,
 	InputRateLimit = 0.08,
 	MaxInputMagnitude = 1.2,
@@ -45,7 +36,6 @@ local function getOrCreateShip(player: Player): ShipState
 	if not ship then
 		ship = {
 			Velocity = Vector3.new(),
-			LastDockTime = 0,
 			Weight = 0,
 			LastInputTime = 0,
 			SailingEnabled = true,
@@ -110,37 +100,6 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 	if not enabled then
 		ship.Velocity = Vector3.new()
 	end
-end
-
-function ShipController.AttemptDock(player: Player)
-	local ship = activeShips[player]
-	if not ship or (os.clock() - ship.LastDockTime) < 2.2 then return end
-
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if not root then return end
-
-	for _, ghost in CollectionService:GetTagged("GhostShip") do
-		local primary = ghost.PrimaryPart
-		if primary and (primary.Position - root.Position).Magnitude < CONFIG.DockingDistance then
-			ship.LastDockTime = os.clock()
-
-			Remotes.PlayerDocked:FireClient(player, ghost)
-			
-			-- Guarded calls (prevents nil errors)
-			if typeof(AudioManager.PlayBoardingSound) == "function" then
-				AudioManager.PlayBoardingSound(ghost)
-			end
-			if typeof(HorrorEvents.TriggerSanityDamage) == "function" then
-				HorrorEvents.TriggerSanityDamage(player, 12)
-			end
-			if typeof(HorrorEvents.TriggerHorrorPulse) == "function" then
-				HorrorEvents.TriggerHorrorPulse(0.8)
-			end
-
-			return true
-		end
-	end
-	return false
 end
 
 function ShipController.Destroy()
