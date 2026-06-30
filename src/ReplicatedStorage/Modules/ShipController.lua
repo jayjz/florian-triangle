@@ -72,7 +72,15 @@ function ShipController.Initialize()
 			local root = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if root then
 				local penalty = 1 - (ship.Weight / 80) * CONFIG.BaseWeightPenalty
-				root.AssemblyLinearVelocity = ship.Velocity * math.clamp(penalty, 0.2, 1.0)
+				-- Preserve Y velocity for gravity/jump/fall physics.
+				-- ShipController owns HORIZONTAL (X/Z) sailing movement,
+				-- physics engine owns VERTICAL (Y) gravity/jump/fall.
+				-- Without Y preservation: gravity cancelled → float instead of fall,
+				-- jump impulse cancelled → can't jump. With Y preservation:
+				-- walk off ship deck → FALL with gravity, jump works naturally.
+				local sv = ship.Velocity * math.clamp(penalty, 0.2, 1.0)
+				local av = root.AssemblyLinearVelocity
+				root.AssemblyLinearVelocity = Vector3.new(sv.X, av.Y, sv.Z)
 			end
 		end
 	end))
@@ -177,12 +185,24 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 		local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
 		if humanoid then
 			if enabled then
-				-- Sailing mode: disable Humanoid movement, ShipController owns physics
+				-- Sailing mode: disable Humanoid movement, ShipController owns physics.
+				-- WalkSpeed = 0 / AutoRotate = false prevents Humanoid from fighting
+				-- ShipController's AssemblyLinearVelocity (tug-of-war bug).
+				-- JumpPower = 0 / JumpHeight = 0 disables jumping while sailing —
+				-- consistent with WalkSpeed/AutoRotate toggle: sailing mode =
+				-- ShipController owns 100% of physics, Humanoid owns 0%.
+				-- Prevents accidental falls off ship deck, simpler state machine.
+				-- Set UseJumpPower = true to ensure JumpPower (not JumpHeight)
+				-- is respected — Roblox defaults to JumpHeight mode in some rigs.
 				humanoid.WalkSpeed = 0
 				humanoid.AutoRotate = false
+				humanoid.UseJumpPower = true
+				humanoid.JumpPower = 0
+				humanoid.JumpHeight = 0
 			else
-				-- On-foot mode: restore Humanoid movement, ShipController hands off
+				-- On-foot mode: restore Humanoid movement, ShipController hands off.
 				-- Reset AssemblyLinearVelocity so Humanoid starts from clean state
+				-- (no residual drift/slide from sailing velocity).
 				local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 				if root then
 					root.AssemblyLinearVelocity = Vector3.zero
@@ -190,6 +210,9 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 				end
 				humanoid.WalkSpeed = 16
 				humanoid.AutoRotate = true
+				humanoid.UseJumpPower = true
+				humanoid.JumpPower = 50
+				humanoid.JumpHeight = 7.2
 			end
 		end
 	end
