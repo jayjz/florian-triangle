@@ -25,6 +25,7 @@ export type Entity = {
     State: EntityState,
     LastPathfind: number,
     LastLOSCheck: number,
+    LastLOSResult: boolean,
     LastAttack: number,
     Maid: any,
     CurrentPath: {Vector3}?,
@@ -71,6 +72,7 @@ function EntityAI.Create(template: Model, spawnPosition: Vector3): Entity
         State = "Idle",
         LastPathfind = 0,
         LastLOSCheck = 0,
+        LastLOSResult = false,
         LastAttack = 0,
         Maid = maid,
         CurrentPath = nil,
@@ -95,12 +97,19 @@ end
 -- ==================== HELPERS ====================
 
 local function hasLineOfSight(entity: Entity, targetPos: Vector3): boolean
+    -- LOS check is expensive (raycast), throttle to CONFIG.LOSInterval.
+    -- Return CACHED result during cooldown — was returning false unconditionally,
+    -- which caused ranged attacks to almost always miss (attack check → LOS check
+    -- → cooldown active → false → attack cancelled, even if target IS visible).
     if tick() - entity.LastLOSCheck < CONFIG.LOSInterval then
-        return false
+        return entity.LastLOSResult
     end
     entity.LastLOSCheck = tick()
 
+    -- Fog visibility culling — if target is beyond fog visibility range,
+    -- skip raycast, no LOS (optimization + horror fog mechanic).
     if (targetPos - entity.Root.Position).Magnitude > FogSystem.GetVisibilityDistance() * 1.3 then
+        entity.LastLOSResult = false
         return false
     end
 
@@ -109,7 +118,10 @@ local function hasLineOfSight(entity: Entity, targetPos: Vector3): boolean
     params.FilterType = Enum.RaycastFilterType.Exclude
 
     local result = Workspace:Raycast(entity.Root.Position, targetPos - entity.Root.Position, params)
-    return result == nil
+    -- Raycast returns nil if nothing hit = clear line of sight.
+    -- Any hit = wall/obstacle blocking vision.
+    entity.LastLOSResult = result == nil
+    return entity.LastLOSResult
 end
 
 function EntityAI:ComputePath(targetPos: Vector3)
