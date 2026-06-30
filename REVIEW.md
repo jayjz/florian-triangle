@@ -482,4 +482,43 @@ Georgie — pull `bb75a68`, test movement in ALL FIVE states: (1) lobby on foot,
 
 ---
 
+## 2026-06-30 — Fix ShipController Velocity Yanking — 3-Layer Defense
+**Commit:** 498226c
+**Reviewer:** OpenClaw Architect
+
+**What's Good:**
+- Fixes 3 interlocking velocity pollution bugs that caused player yanking/pulling after the bb75a68 movement handoff fix. bb75a68 fixed the Heartbeat ALV tug-of-war (ShipController no longer touches AssemblyLinearVelocity when SailingEnabled==false), which stopped the "yanking during lobby walking" symptom. But 3 velocity pollution bugs remained, causing "stale velocity launch" on round start / ghost ship exit.
+- **Layer 1 — isInputAllowed hardening (Bug 3):** Was accepting input when NO ShipState exists → first WASD press created ShipState + set velocity during lobby/on-foot (Humanoid should own movement). Now rejects input unless ShipState exists AND SailingEnabled==true. Forces opt-in via SetSailing(true) before ANY velocity writes. Server-side validation = exploit-proof even if client is compromised/spoofing.
+- **Layer 2 — Stale velocity reset (Bug 1):** Was zeroing velocity ONLY on SetSailing(false). Now zeros velocity on EVERY SetSailing() state change (both enable and disable). Root cause: lobby WASD → ShipState.Velocity polluted → RoundManager.StartRound() → SetSailing(true) → instant launch with stale lobby velocity. Same bug on ExitGhostShip → launch with pre-boarding velocity. Now: always start sailing from zero velocity, no launch possible. Added 0.2s input debounce on SetSailing(true) as safety net — ship.LastInputTime = os.clock() + 0.2, isInputAllowed() blocks input during debounce window, kills any residual/stale input that might sneak through.
+- **Layer 3 — Client input gating (Bug 2):** Was firing PlayerMoveInput every RenderStepped (60 Hz) unconditionally, even during lobby/on-foot. This is what CAUSED the velocity pollution in Bug 1. Now gates on `player:GetAttribute("SailingEnabled") ~= true then return end`. ShipController.SetSailing() sets `player:SetAttribute("SailingEnabled", enabled)` so client can gate at the source. Stops: (1) bandwidth waste (~1.2kb/sec per moving player, ~7.2kb/sec for 6 players in lobby), (2) ShipState velocity pollution from on-foot WASD. Server-side isInputAllowed() is defense-in-depth.
+- **Defense-in-depth — 3 layers, any 1 layer stops the yanking, all 3 together = bulletproof.** Even if client input gating fails (exploiter spoofing RemoteEvent), server isInputAllowed rejects. Even if isInputAllowed has a bug, SetSailing(true) zeros velocity + 0.2s debounce kills the launch. Even if velocity reset is bypassed somehow, client input gating prevents pollution in the first place. This is how you fix physics bugs — multiple independent layers, no single point of failure.
+- Client-side Attribute gating is the RIGHT pattern — `player:SetAttribute("SailingEnabled", enabled)` replicates to client automatically, no extra RemoteEvent needed, no network cost, instant local read via `GetAttribute()`. Cleaner than adding a PlayerUndocked RemoteEvent (which was flagged as missing in bb75a68 review — now obsolete, AttributeChanged signal can be used if client ever needs to react to exit).
+- Input debounce (0.2s) is a good safety net — even if velocity somehow gets polluted, input is blocked for 200ms after SetSailing(true), giving time for any in-flight RemoteEvent packets to arrive and be rejected, and for the player to lift their fingers off WASD between lobby walking and sailing start. 200ms is imperceptible to players (they're still orienting themselves at round start / exit), but kills the entire class of "residual input launch" bugs.
+- Bandwidth savings are real — ~1.2kb/sec/player eliminated during lobby/on-foot, ~0.4MB/min saved for 6 players. Minor in absolute terms, but free, and scales with player count.
+- Security hardened — isInputAllowed() now requires ShipState + SailingEnabled==true, exploiters can't create ShipState + set velocity from lobby, must go through SetSailing(true) which is server-only.
+- --!strict clean, no API changes, backward compatible, well-commented (each fix explains WHY, not just WHAT — "Prevents stale velocity launch bug: if player walked in lobby..." etc.)
+
+**What's Broken:**
+- Nothing blocking. All 3 velocity pollution bugs fixed, movement should be clean.
+
+**Nits:**
+- Y velocity / gravity bug STILL NOT FIXED — carried forward from bb75a68. `root.AssemblyLinearVelocity = ship.Velocity * penalty` overwrites Y to 0 every Heartbeat → gravity cancelled → floating / no jump / can't fall off ship. Fix is 1 line: preserve Y velocity component. Ship this as immediate follow-up, do NOT wait for playtest.
+- WalkSpeed hardcoded to 16, no ghost ship interior slow-walk for horror atmosphere — defer to playtest feedback.
+- No mobile touch / gamepad input — ClientShipController only reads WASD, defer until PC movement is confirmed solid.
+- No Studio playtest confirmation yet — same gap as bb75a68. Code review confidence HIGH (3-layer defense, each layer independently stops the bug), but no substitute for in-engine validation.
+
+**Luau / Roblox Best Practices Check:**
+- ✅ `--!strict` clean — no new type errors
+- ✅ Attribute replication used correctly — `player:SetAttribute("SailingEnabled", enabled)` replicates server→client automatically, client reads via `GetAttribute()`, nil-safe check (`~= true` handles nil case correctly → input gated off, safe default)
+- ✅ Fail-safe defaults — `player:GetAttribute("SailingEnabled") ~= true` means: attribute missing / nil / false → input BLOCKED. Safe default = no input spam, no velocity pollution. If attribute replication is delayed at join time, player just can't move for a few frames until attribute arrives → imperceptible, vs the unsafe alternative (`== false` check) which would allow input spam during the replication gap.
+- ✅ Server-side validation never removed — isInputAllowed() is defense-in-depth, NOT replaced by client gating. Client gating is optimization + UX improvement, server validation is security boundary. Correct architecture: never trust the client.
+- ✅ No `wait()` — pure synchronous state changes
+- ✅ Config-driven tuning — `SailingInputDebounce = 0.2` in CONFIG, not magic number, easy to tune to 0.1s (snappier) or 0.5s (safer) based on playtest
+
+**Approval:** Yes — ship it. 3-layer defense against velocity yanking, each layer independently sufficient, together bulletproof. Fixes the bug Georgie reported (player yanked when walking normally, started after SetSailing + BoardGhostShip changes). Server hardening (isInputAllowed), state machine fix (velocity reset), client optimization (input gating), all in one clean commit. --!strict clean, no API breakage, backward compatible. Commit 498226c is good to merge.
+
+**Next step: PLAYTEST — CONFIRM VELOCITY YANKING IS FIXED.** Pull `agent/autonomous-florian-triangle @ 498226c`, test: lobby walk → round start sail (check for LAUNCH!) → board → loot → exit (check for LAUNCH!) → extract → lobby return → repeat 3 rounds. NO yanking at ANY stage. If clean: ship movement system, fix Y velocity / gravity bug next (1 LOC), then EntityAI LOS bug (1 LOC). If still broken: report EXACT transition + what you felt + video clip, iterate immediately — movement is P0.
+
+---
+
 ---
