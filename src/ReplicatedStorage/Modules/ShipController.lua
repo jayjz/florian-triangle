@@ -35,6 +35,7 @@ local CONFIG = {
 	BoardingSanityDamage = 12,
 	BoardingHorrorPulse = 0.8,
 	BoardingDebounce = 1.5,
+	SailingInputDebounce = 0.2,
 }
 
 local function getOrCreateShip(player: Player): ShipState
@@ -54,8 +55,8 @@ end
 
 local function isInputAllowed(player: Player): boolean
 	local ship = activeShips[player]
-	if not ship then return true end
-	if ship.SailingEnabled == false then return false end
+	if not ship then return false end
+	if not ship.SailingEnabled then return false end
 	return (os.clock() - (ship.LastInputTime or 0)) > CONFIG.InputRateLimit
 end
 
@@ -147,6 +148,27 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 	local ship = getOrCreateShip(player)
 	ship.SailingEnabled = enabled
 
+	-- Velocity reset: Always zero ship velocity on sailing state change.
+	-- Prevents stale velocity launch bug: if player walked in lobby (Humanoid,
+	-- SailingEnabled=false), ShipState.Velocity gets polluted by input.
+	-- Without this reset, SetSailing(true) at round start → instant launch
+	-- in last-walked direction. Same for ExitGhostShip → launch with
+	-- pre-boarding velocity. Always start sailing from zero velocity.
+	ship.Velocity = Vector3.new()
+
+	-- Client input gating: Set Player attribute so ClientShipController
+	-- can skip firing PlayerMoveInput when not sailing. Stops input spam
+	-- (60 Hz RenderStepped → server) during lobby/on-foot, prevents
+	-- ShipState velocity pollution, reduces bandwidth.
+	player:SetAttribute("SailingEnabled", enabled)
+
+	-- Input debounce: Block move input for SailingInputDebounce seconds
+	-- after enabling sailing. Safety net against stale/residual input
+	-- causing instant launch. isInputAllowed() checks LastInputTime.
+	if enabled then
+		ship.LastInputTime = os.clock() + CONFIG.SailingInputDebounce
+	end
+
 	-- Toggle Humanoid movement controller to prevent tug-of-war with
 	-- AssemblyLinearVelocity. When sailing: Humanoid OFF, ShipController ON.
 	-- When on foot: Humanoid ON, ShipController OFF.
@@ -170,10 +192,6 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 				humanoid.AutoRotate = true
 			end
 		end
-	end
-
-	if not enabled then
-		ship.Velocity = Vector3.new()
 	end
 end
 

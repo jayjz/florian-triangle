@@ -43,8 +43,17 @@ function ClientShipController.Initialize()
 		onGhostShipAdded(obj)
 	end
 
-	-- Movement input
+	local player = Players.LocalPlayer
+
+	-- Movement input — only fire when sailing is enabled.
+	-- ShipController.SetSailing() sets player:SetAttribute("SailingEnabled", bool)
+	-- to gate input. This prevents:
+	-- 1. Input spam during lobby/on-foot (60 Hz RenderStepped → server, wasted bandwidth)
+	-- 2. ShipState velocity pollution from on-foot WASD (stale velocity launch bug)
+	-- Server also validates via isInputAllowed() as defense-in-depth.
 	maid:GiveTask(RunService.RenderStepped:Connect(function()
+		if player:GetAttribute("SailingEnabled") ~= true then return end
+
 		local moveDir = Vector3.new(0, 0, 0)
 		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += Vector3.new(0, 0, -1) end
 		if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir += Vector3.new(0, 0, 1) end
@@ -63,7 +72,6 @@ function ClientShipController.Initialize()
 		-- Camera shake + FOV kick
 		local camera = workspace.CurrentCamera
 		if not camera then return end
-		local player = Players.LocalPlayer
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid") :: Humanoid?
 
