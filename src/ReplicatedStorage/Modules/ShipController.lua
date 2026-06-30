@@ -18,6 +18,7 @@ local Remotes = {
 
 type ShipState = {
 	Velocity: Vector3,
+	TargetVelocity: Vector3,
 	Weight: number,
 	LastInputTime: number,
 	SailingEnabled: boolean,
@@ -30,12 +31,15 @@ local maid = Utils.CreateMaid()
 local CONFIG = {
 	MaxSpeed = 58,
 	BaseWeightPenalty = 0.78,
-	InputRateLimit = 0.08,
+	InputRateLimit = 0, -- Unlimited — client does change detection (~2-10 packets/sec), process immediately for zero artificial latency
 	MaxInputMagnitude = 1.2,
 	BoardingSanityDamage = 12,
 	BoardingHorrorPulse = 0.8,
 	BoardingDebounce = 1.5,
 	SailingInputDebounce = 0.2,
+	VelocityLerpAlpha = 0.22, -- Heartbeat velocity smoothing (60Hz). 0.22 → 99% convergence in ~18 frames (~0.3s), responsive but not twitchy
+	IdleFriction = 0.92, -- Velocity decay when no recent input (per Heartbeat). 0.92^60 ≈ 0.007 → stops in ~1 sec after releasing keys
+	InputTimeout = 0.15, -- Seconds after last input before idle friction kicks in. Allows brief input gaps (packet loss, frame drops) without triggering friction
 }
 
 local function getOrCreateShip(player: Player): ShipState
@@ -43,6 +47,7 @@ local function getOrCreateShip(player: Player): ShipState
 	if not ship then
 		ship = {
 			Velocity = Vector3.new(),
+			TargetVelocity = Vector3.new(),
 			Weight = 0,
 			LastInputTime = 0,
 			SailingEnabled = false, -- Default to Humanoid movement (lobby/on-foot). Opt-in to ShipController sailing.
@@ -62,6 +67,7 @@ end
 
 function ShipController.Initialize()
 	maid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
+		local now = os.clock()
 		for player, ship in activeShips do
 			-- Only control AssemblyLinearVelocity when actively sailing.
 			-- When SailingEnabled == false, let Roblox Humanoid handle movement
@@ -71,6 +77,37 @@ function ShipController.Initialize()
 			if not player.Character then continue end
 			local root = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if root then
+				-- Velocity smoothing: Lerp current Velocity toward TargetVelocity every frame.
+				-- TargetVelocity is set INSTANTLY by input packets (client change detection:
+				-- ~2-10 packets/sec, direction changes only, zero artificial latency).
+				-- Heartbeat interpolation (60Hz) makes movement smooth REGARDLESS of input rate.
+				-- This decouples network input rate from movement feel — critical for
+				-- change-detection input (was: input spam 60Hz → Lerp in input handler,
+				-- smooth but wasteful; now: input on change → Lerp in Heartbeat, smooth + efficient).
+				ship.Velocity = ship.Velocity:Lerp(ship.TargetVelocity, CONFIG.VelocityLerpAlpha)
+
+				-- Idle friction: decay velocity to zero when no recent input.
+				-- Without this: player releases keys → stop packet sent → TargetVelocity = 0
+				-- → Velocity Lerps 22% toward 0 → stuck at 78% speed forever (no more input
+				-- packets → no more Lerp steps → velocity frozen). WITH friction: after
+				-- InputTimeout (0.15s) with no input packets, apply exponential decay
+				-- (0.92 per frame → stops in ~1 sec). Ship coasts to a natural stop,
+				-- like water drag / anchor drop. Feels good, prevents drift bug.
+				-- InputTimeout = 0.15s allows brief input gaps (packet loss, frame drops)
+				-- without triggering friction — input resumes → friction stops, smooth.
+				if now - ship.LastInputTime > CONFIG.InputTimeout then
+					ship.Velocity *= CONFIG.IdleFriction
+					ship.TargetVelocity *= CONFIG.IdleFriction
+					-- Snap to zero when velocity is negligible — prevents infinite
+					-- asymptotic decay (0.92^n never actually reaches 0), saves CPU
+					-- (stopped ship = zero ALV writes = less physics work), prevents
+					-- micro-drift (ship creeping at 0.001 studs/sec forever).
+					if ship.Velocity.Magnitude < 0.1 then
+						ship.Velocity = Vector3.new()
+						ship.TargetVelocity = Vector3.new()
+					end
+				end
+
 				local penalty = 1 - (ship.Weight / 80) * CONFIG.BaseWeightPenalty
 				-- Preserve Y velocity for gravity/jump/fall physics.
 				-- ShipController owns HORIZONTAL (X/Z) sailing movement,
@@ -92,11 +129,23 @@ function ShipController.Initialize()
 
 		local ship = getOrCreateShip(player)
 
-		local targetVelocity = Vector3.new()
+		-- Set TargetVelocity INSTANTLY — no Lerp here.
+		-- Velocity smoothing happens in Heartbeat (60Hz): ship.Velocity:Lerp(ship.TargetVelocity, 0.22)
+		-- This decouples network input rate from movement feel — critical for change-detection
+		-- input (client sends ~2-10 packets/sec, direction changes only). Old system: Lerp in
+		-- input handler (0.38 alpha) + input spam 60Hz = smooth but wasteful (47.5/60 packets
+		-- dropped, 80ms artificial latency). New system: input on change + Heartbeat Lerp =
+		-- smooth + efficient + zero artificial latency.
+		-- moveDir = Vector3.zero is VALID — that's the STOP packet (keys released).
+		-- Client change detection sends stop packets: moveDir goes from non-zero → zero
+		-- → (moveDir - lastMoveDir).Magnitude > 0.01 → FireServer(Vector3.zero)
+		-- → TargetVelocity = 0 → Heartbeat Lerps Velocity toward 0 → idle friction
+		-- kicks in after 0.15s → ship coasts to stop in ~1 sec. Feels natural.
 		if moveDir.Magnitude > 0 then
-			targetVelocity = moveDir.Unit * CONFIG.MaxSpeed
+			ship.TargetVelocity = moveDir.Unit * CONFIG.MaxSpeed
+		else
+			ship.TargetVelocity = Vector3.new()
 		end
-		ship.Velocity = ship.Velocity:Lerp(targetVelocity, 0.38)
 		ship.LastInputTime = os.clock()
 	end)
 
@@ -162,7 +211,11 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 	-- Without this reset, SetSailing(true) at round start → instant launch
 	-- in last-walked direction. Same for ExitGhostShip → launch with
 	-- pre-boarding velocity. Always start sailing from zero velocity.
+	-- Reset BOTH Velocity and TargetVelocity — TargetVelocity is set by input
+	-- packets (client change detection), Velocity is lerped toward TargetVelocity
+	-- in Heartbeat. Zeroing both prevents instant launch + drift.
 	ship.Velocity = Vector3.new()
+	ship.TargetVelocity = Vector3.new()
 
 	-- Client input gating: Set Player attribute so ClientShipController
 	-- can skip firing PlayerMoveInput when not sailing. Stops input spam

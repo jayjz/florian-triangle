@@ -45,14 +45,25 @@ function ClientShipController.Initialize()
 
 	local player = Players.LocalPlayer
 
-	-- Movement input — only fire when sailing is enabled.
+	-- Movement input — only fire when sailing is enabled + input CHANGED.
 	-- ShipController.SetSailing() sets player:SetAttribute("SailingEnabled", bool)
-	-- to gate input. This prevents:
-	-- 1. Input spam during lobby/on-foot (60 Hz RenderStepped → server, wasted bandwidth)
+	-- to gate input. Change detection prevents:
+	-- 1. Input spam during sailing (60 Hz RenderStepped → server, wasted bandwidth)
+	--    Before: holding W → 60 identical packets/sec → server rate-limits to 12.5Hz
+	--    → 47.5/60 packets/sec DROPPED + 80ms artificial latency
+	--    After: press W → 1 packet, hold W 5 sec → 0 packets, release W → 1 stop packet
+	--    → ~2-10 packets/sec actual (direction changes only), zero artificial latency
 	-- 2. ShipState velocity pollution from on-foot WASD (stale velocity launch bug)
-	-- Server also validates via isInputAllowed() as defense-in-depth.
+	-- Server validates via isInputAllowed() as defense-in-depth.
+	local lastMoveDir = Vector3.new(0, 0, 0)
 	maid:GiveTask(RunService.RenderStepped:Connect(function()
-		if player:GetAttribute("SailingEnabled") ~= true then return end
+		if player:GetAttribute("SailingEnabled") ~= true then
+			-- Reset lastMoveDir when not sailing so first sailing input always fires
+			-- (prevents: sail → board → exit → press W → moveDir unchanged from pre-board
+			-- → change detection blocks input → ship won't move until direction changes)
+			lastMoveDir = Vector3.new(0, 0, 0)
+			return
+		end
 
 		local moveDir = Vector3.new(0, 0, 0)
 		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += Vector3.new(0, 0, -1) end
@@ -60,8 +71,20 @@ function ClientShipController.Initialize()
 		if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir += Vector3.new(-1, 0, 0) end
 		if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += Vector3.new(1, 0, 0) end
 
-		if moveDir.Magnitude > 0 then
-			Remotes.PlayerMoveInput:FireServer(moveDir.Unit)
+		if moveDir.Magnitude > 1 then
+			moveDir = moveDir.Unit
+		end
+
+		-- Only fire when input CHANGED (including stop: moveDir going to zero).
+		-- Threshold 0.01 catches direction changes, ignores float precision noise.
+		-- This fixes the "ship never stops" bug: previously client only fired when
+		-- moveDir.Magnitude > 0, so releasing keys → NO packet → server never gets
+		-- stop command → ship sails forever at last velocity. Now: keys released →
+		-- moveDir = (0,0,0) → differs from lastMoveDir → FireServer(Vector3.zero)
+		-- → server sets targetVelocity = 0 → ship decelerates via Lerp → stops.
+		if (moveDir - lastMoveDir).Magnitude > 0.01 then
+			lastMoveDir = moveDir
+			Remotes.PlayerMoveInput:FireServer(moveDir)
 		end
 	end))
 
