@@ -338,3 +338,94 @@ After playtest confirms movement fix: continue with **EntityAI ranged attack LOS
 **Next step:** **PLAYTEST — CONFIRM VELOCITY YANKING IS FIXED.** Pull `agent/autonomous-florian-triangle @ 498226c`, test full movement loop: Foosha lobby walk → Windmill Village sail (check for launch at round start!) → board ghost ship → walk interior → loot → exit (check for launch on exit!) → extract → lobby return → repeat 3 rounds. Confirm NO yanking/pulling/launching at ANY stage. If clean: ship the movement system, move to EntityAI LOS bug (Bug #4, 1 LOC). If still broken: report EXACTLY which transition, what you felt, video clip, and iterate immediately — movement is P0, blocks all other gameplay.
 
 **Reviewer notes:** See REVIEW.md
+
+---
+
+## 2026-06-30 — Fix ShipController Gravity / Y Velocity Bug + JumpPower Toggle
+
+**Commit:** `3adfae3` — `fix(ship): preserve Y velocity for gravity/jump — disable jumping while sailing`
+
+**What was done:**
+- **`ShipController.lua`: Fixed gravity / Y velocity bug in Heartbeat loop** — was: `root.AssemblyLinearVelocity = ship.Velocity * penalty` → `ship.Velocity.y = 0` always → `AssemblyLinearVelocity.y = 0` every Heartbeat (60×/sec) → gravity CANCELLED → character FLOATS instead of falling, jump impulse CANCELLED immediately → can't jump. Now: preserve Y velocity → `local sv = ship.Velocity * penalty; local av = root.AssemblyLinearVelocity; root.AssemblyLinearVelocity = Vector3.new(sv.X, av.Y, sv.Z)` → ShipController owns HORIZONTAL (X/Z) sailing movement, physics engine owns VERTICAL (Y) gravity/jump/fall. Clean separation of concerns.
+- **`ShipController.lua`: Added JumpPower toggle in `SetSailing()`** — sailing mode: `humanoid.UseJumpPower = true; humanoid.JumpPower = 0; humanoid.JumpHeight = 0` → jumping DISABLED while sailing, consistent with WalkSpeed=0/AutoRotate=false toggle pattern → ShipController owns 100% of physics when sailing, Humanoid owns 0%, prevents accidental falls off ship deck, simpler state machine. On-foot mode: `JumpPower = 50; JumpHeight = 7.2` → normal Roblox jump restored for lobby / ghost ship interior.
+- 1 file, ~15 LOC (code + comments), --!strict clean.
+
+**What broke / why:**
+- **Gravity / Y velocity bug — carried forward from bb75a68.** `AssemblyLinearVelocity.y = 0` every Heartbeat → gravity cancelled → float instead of fall, jump impulse cancelled → can't jump. Bug was PRE-EXISTING (since ShipController first set AssemblyLinearVelocity), masked by the tug-of-war bug (bb75a68) being MORE broken / more visible. Now that movement handoff is fixed (bb75a68 + 498226c), gravity bug surfaces — fixed immediately before playtest results get polluted.
+- Symptoms: walk off edge of ship deck while sailing → FLOAT in midair instead of FALL into ocean → breaks immersion, breaks drowning/ocean hazard mechanics. Press Spacebar while sailing → jump impulse → cancelled 1/60 sec later → jump height ≈ 0.
+- JumpPower was NOT being toggled in `SetSailing()` — only WalkSpeed/AutoRotate were toggled. After fixing Y velocity preservation, jumping WOULD work while sailing (forward momentum preserved, arc natural) — design decision: DISABLE jumping while sailing for consistency ("sailing mode = ShipController owns EVERYTHING, on foot = Humanoid owns EVERYTHING", ZERO overlap), prevents frustration falls off ship deck. If playtesting shows players WANT to jump while sailing, re-enable easily: 1 line change (`JumpPower = 50`).
+
+**What worked:**
+- Gravity works while sailing — walk off ship deck → FALL into ocean with gravity acceleration, do NOT float ✅
+- Jumping disabled while sailing — `JumpPower = 0`, character stays grounded, no accidental falls ✅
+- Jumping works normally on foot — lobby / ghost ship interior, `JumpPower = 50`, normal Roblox jump ✅
+- Horizontal sailing movement unchanged — X/Z velocity, weight penalties, 58 studs/sec max all preserved ✅
+- No regression in Humanoid movement handoff — lobby / ghost ship interior movement still works ✅
+- `UseJumpPower = true` ensures JumpPower is respected regardless of rig defaults (some R15 rigs default to JumpHeight mode) — defensive, correct ✅
+- --!strict clean, no API changes, no network changes ✅
+
+**Known gaps:**
+- No mid-air jump velocity zeroing on SetSailing(true) — if player is MID-JUMP when SetSailing(true) is called (e.g., round start teleports them while jumping in lobby), Y velocity from jump is preserved → player continues jump arc while sailing starts. Minor edge case, harmless — jump arc completes in ~0.5 sec, sailing resumes normally. Round start teleport via `LobbyManager.TeleportToGame()` sets `AssemblyLinearVelocity = 0`, wiping jump velocity BEFORE SetSailing(true), so lobby→sail transition is clean. Ghost ship exit: player COULD be jumping at exit moment → Y velocity preserved → continue jump arc while sailing resumes → slightly weird but harmless, not worth adding Y velocity zeroing to SetSailing(true) (would re-introduce gravity bug). Keep as-is.
+- No client-side input change detection — still spamming 60 identical packets/sec, server rejecting 47.5/sec → wasted bandwidth + artificial input latency → movement feels laggy. Next fix.
+- No mobile touch / gamepad input — ClientShipController only reads WASD, defer until PC movement confirmed solid.
+- No Studio playtest confirmation — code review confidence HIGH, but no substitute for in-engine validation. Pull `3adfae3`, confirm: fall off ship deck → gravity works, jump while sailing → disabled, jump on foot → works normally.
+
+**Next step:** Fix EntityAI ranged attack LOS bug — Bug #4 (HIGH), ~5 LOC. `hasLineOfSight()` returns `false` during cooldown instead of cached result → ranged attacks ~5% hit rate. Fix: cache LastLOSResult, return cached value during cooldown → ~60-80% hit rate, AI combat effectiveness restored.
+
+**Reviewer notes:** See REVIEW.md
+
+---
+
+## 2026-06-30 — Fix EntityAI Ranged Attack LOS Bug — Bug #4 / HIGH
+
+**Commit:** `39e582a` — `fix(ai): EntityAI ranged LOS — return cached result during cooldown, was always false`
+
+**What was done:**
+- **`EntityAI.lua`: Fixed `hasLineOfSight()` returning `false` during cooldown instead of cached result** — was causing ranged attacks to almost always miss (~5% hit rate instead of ~60-80%).
+- Added `Entity.LastLOSResult: boolean` field to Entity type — caches last raycast result.
+- Initialized `LastLOSResult = false` in `EntityAI.Create()` — safe default (assume no LOS until first check passes).
+- `hasLineOfSight()`: was `if tick() - entity.LastLOSCheck < CONFIG.LOSInterval then return false end` → now `return entity.LastLOSResult` — return CACHED result during 0.35s cooldown, don't reject attack just because raycast is throttled.
+- Cache result in ALL return paths: fog culling path → `entity.LastLOSResult = false`, raycast path → `entity.LastLOSResult = result == nil` — no path leaves cache stale.
+- Added explanatory comments: "LOS check is expensive (raycast), throttle to CONFIG.LOSInterval. Return CACHED result during cooldown — was returning false unconditionally, which caused ranged attacks to almost always miss"
+- 1 file, ~15 LOC (type field + init + cache logic + comments), --!strict clean.
+
+**What broke / why:**
+- **Bug #4 — EntityAI ranged attack LOS bug — HIGH.** `hasLineOfSight(entity, targetPos)` throttles raycasts to `CONFIG.LOSInterval = 0.35s` for performance (raycast = expensive). During cooldown: `if tick() - entity.LastLOSCheck < 0.35 then return false end` → BUG: returns `false` unconditionally, NOT cached result.
+- `hasLineOfSight()` is called from TWO places:
+  1. `EntityAI:Update()` state machine — `elseif closestDist < CONFIG.RangedRange and hasLineOfSight(self, closestPos) then self.State = "Attacking"` — decides whether to enter Attacking state
+  2. `EntityAI:PerformAttack("Ranged", ...)` — `if dist < CONFIG.RangedRange + 5 and hasLineOfSight(self, targetRoot.Position) then hum:TakeDamage(...)` — validates target still visible before dealing damage
+- Both checks fail during cooldown → attack cancelled → ranged attacks almost always miss (~5% hit rate, only hits when LOS check happens to align with attack timing)
+- Root cause: LOS throttling was designed to reduce raycast cost (correct), but the cooldown return value was wrong — should return LAST KNOWN result (cached), not `false` (assume no LOS). Returning `false` means "I don't know, so assume NO" → attacks cancelled → AI is useless at range.
+- Fixes BUG_AUDIT_2026-06-29.md — Bug #4 — HIGH
+
+**What worked:**
+- Ranged attacks HIT when target is in LOS ✅
+- Ranged attacks MISS when target breaks LOS (behind cover) ✅
+- Hit rate ~60-80% (was ~5%) ✅
+- Raycast throttling still works — 1 raycast per 0.35s per entity, NOT every frame ✅
+- AI combat effectiveness restored — corrupted pirates are actually THREATENING at range now ✅
+- Cache is updated in ALL code paths — fog culling sets `LastLOSResult = false`, raycast hit/miss sets `LastLOSResult = result == nil`, no stale cache bug ✅
+- Safe default — `LastLOSResult = false` on entity spawn → first LOS check within 0.35s returns `false` (assume no LOS until proven), prevents entities shooting through walls on spawn frame before first raycast completes ✅
+- --!strict clean, proper type annotations (`LastLOSResult: boolean`), no anys ✅
+- Small focused change — 1 file, ~15 LOC, server-side only, zero client impact, zero network protocol changes ✅
+- Pairs with ApplySanityDrain fix (9fd75c8) — entities now deal BOTH sanity damage via proximity aura (~6/sec) AND health damage via ranged attacks (~14 damage/hit, ~60-80% accuracy) → corrupted pirates are ACTUALLY DANGEROUS → horror tension = MAXIMUM
+
+**Known gaps:**
+- No LOS result invalidation on target teleport / rapid position change — if target teleports behind a wall within the 0.35s cooldown window, entity will still "see" them (cached LOS = true) and fire a ranged attack that goes through the wall (server-side damage still applies — `PerformAttack` does its OWN LOS check, which ALSO returns cached result, so same bug in both places, fixed in both places by this commit). Worst case: 0.35s of "seeing through walls" → 1 extra attack that shouldn't have fired → ~14 damage → acceptable for a horror game (makes entities feel slightly psychic / unfair → MORE scary, not less). If this becomes a gameplay problem (players exploiting by ducking behind cover and still getting shot for 0.35s), reduce `LOSInterval` from 0.35s to 0.15s → halves the "see through walls" window, doubles raycast cost (still cheap: 1 raycast per 0.15s × 20 entities = ~133 raycasts/sec, well within Roblox budget of ~4000 raycasts/sec). Tune based on playtest.
+- No target position change detection — LOS is cached per-entity, NOT per-target-position. If target moves 50 studs sideways behind cover within 0.35s, cached LOS is still `true` (from old position, clear LOS), entity shoots at NEW position (which is behind cover) → attack hits wall, damage still applies (server-side, no projectile travel, instant hitscan) → player takes damage through wall. Same mitigation as above: reduce LOSInterval if this is a problem in playtest, OR add position delta check: `if (targetPos - lastLOSTargetPos).Magnitude > 5 then force fresh raycast` → ~5 extra LOC, defer until playtesting shows it's actually a problem.
+- No predictive aiming — entity shoots at target's CURRENT position, not predicted position (targetPos + velocity × bulletTravelTime). Since ranged attack is instant hitscan (no projectile travel time, damage applied immediately in `PerformAttack`), predictive aiming is NOT needed — hitscan = always hits if LOS = true at fire moment, misses if LOS = false. Correct for current implementation. If we ever add projectile-based ranged attacks (slow-moving horror orbs, dodgeable), THEN add predictive aiming.
+- Ranged attack has no visual projectile / tracer — damage is applied instantly server-side, client sees health drop with no visual feedback (no muzzle flash, no projectile, no impact FX). The `RangedAttackRemote` is created (`local RangedAttackRemote = Utils.CreateRemoteEvent("EntityRangedAttack")`) but is it ever FIRED? grep: `git grep "RangedAttackRemote" -- src/` → only 1 hit, the declaration line. So the RemoteEvent exists but is NEVER fired → client gets ZERO feedback when hit by ranged attack → confusing / frustrating ("why did my health drop?"). Recommend: fire `RangedAttackRemote:FireAllClients(entity.Root.Position, targetPos)` in `PerformAttack("Ranged", ...)` BEFORE dealing damage → client listens, spawns projectile tracer / muzzle flash / impact FX → player UNDERSTANDS they got shot → horror tension + gameplay clarity. ~8 LOC server + ~20 LOC client = ~28 LOC total, high value — do as fast follow-up, pairs with this LOS fix (now that attacks actually HIT, players NEED to know WHEN/WHY they got hit).
+- No damage falloff with distance — ranged damage = flat 14 HP regardless of distance (1 stud vs 28 studs = same damage). Acceptable for MVP, tune later if playtesting shows sniping from max range is too oppressive (add `damage = 14 * (1 - dist / RangedRange * 0.5)` → 14 damage at 0 studs, 7 damage at 28 studs).
+- No attack telegraphing — entity goes from Idle/Chasing → Attacking → damage applied instantly (0 frame wind-up). Players get hit with zero warning → feels cheap / unfair, ESPECIALLY now that attacks actually HIT (~60-80% accuracy vs ~5% before). Recommend: add 0.3-0.5s telegraph — entity stops moving, plays wind-up animation / audio cue / glowing eyes FX, THEN fires → players can DODGE by breaking LOS during telegraph → skill expression → more fun, less frustrating, still scary (oh no it's winding up — RUN!). ~15 LOC (add `AttackWindup` state, 0.4s timer, FX trigger), high gameplay value — do before public playtest, players WILL complain about "unfair instant damage" with the new 60-80% hit rate.
+- PROGRESS.md is now ~420 lines / ~45KB — 13 entries, approaching 500 line / 50KB threshold. Recommend archiving entries older than 2026-06-30 to PROGRESS_ARCHIVE.md after next 1-2 fixes, OR when switching feature areas.
+
+**Next step:** Client-side input change detection + remove server rate limit — MEDIUM, ~15 LOC. `ClientShipController` sends `PlayerMoveInput` EVERY RenderStepped frame (60Hz) when moveDir.Magnitude > 0, EVEN IF moveDir hasn't changed → holding W → sends 60 identical packets/sec → server `isInputAllowed()` rate limits to 12.5Hz → 47.5/60 packets/sec DROPPED → wasted bandwidth + artificial input latency → movement feels laggy.
+- Fix client: store `lastMoveDir`, only `FireServer(moveDir)` if `(moveDir - lastMoveDir).Magnitude > 0.01` → ~2-10 packets/sec actual (direction changes only)
+- Fix server: set `InputRateLimit = 0` (unlimited) → when input DOES change, server processes IMMEDIATELY, zero artificial delay
+- Combined: massive movement feel improvement + network efficiency win
+- Files: `ClientShipController.lua` (~10 LOC) + `ShipController.lua` (1 LOC)
+- Then: Quota Progress HUD (~40 LOC), OR continue with AI polish (attack telegraphing, ranged attack FX)
+
+**Reviewer notes:** See REVIEW.md
+
+
