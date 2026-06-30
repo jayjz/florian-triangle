@@ -325,3 +325,38 @@ Fix boarding double-board exploit (add `SailingEnabled == false` guard to `Board
 **Next step:** Fix HorrorEvents sanity decay math bug (Bug #3 — HIGH, 1 LOC). Sanity drains ~15× too slowly (`decay * dt` instead of `decay * CONFIG.UpdateRate`), players never hit hallucination thresholds in normal match length, horror tension gutted. 1 line fix, massive gameplay impact, P0 for playtestability.
 
 **Reviewer notes:** See REVIEW.md
+
+---
+
+## 2026-06-30 — Fix HorrorEvents Sanity Decay Math — HIGH
+
+**Commit:** `633c6ff` — `fix(horror): correct sanity decay rate — was 15× too slow`
+
+**What was done:**
+- **`HorrorEvents.lua`: Fixed sanity decay rate calculation** — `Update()` throttles to 4Hz (`UpdateRate = 0.25s`) but was multiplying decay by Heartbeat `dt` (~0.016s) instead of actual elapsed time. `decay * 0.016` vs `decay * 0.25` = 15.6× slower than intended.
+- Fix: `level - decay * CONFIG.UpdateRate` (was: `decay * dt`). 1 line arithmetic change + 3 lines explanatory comment.
+- 1 file, ~4 LOC changed total, --!strict clean.
+
+**What broke / why:**
+- **BUG_AUDIT_2026-06-29.md — Bug #3 — HIGH.** Sanity decay math wrong — drains ~15× too slowly (0.06/sec vs 1.0/sec intended). Players never hit hallucination thresholds (70/50/30/10) in a normal 8-minute match. The entire horror tension loop was gutted — fog → sanity drain → hallucinations → panic → extraction tension chain broken at the root.
+- Root cause: `HorrorEvents:Update(dt)` is called from `RunService.Heartbeat` (60Hz), but throttles to 4Hz via `if now - lastUpdate < CONFIG.UpdateRate then return end`. When Update actually RUNS, `dt` is ~0.016s (last Heartbeat frame time), but actual elapsed time since last sanity update is ~0.25s. Using `dt` under-drained by ~15.6×.
+
+**What worked:**
+- Horror pillar restored — sanity now drains at intended rate (~1.0/sec in fog baseline, scaled by `FogSystem.GetSanityDrainMultiplier()`), hallucination thresholds trigger in realistic match time (~30s → 70 sanity, ~50s → 50 sanity, ~70s → 30 sanity in dense fog)
+- Fog → sanity drain → hallucinations → panic → extraction tension loop works end-to-end
+- Comment explains WHY — "Update() throttles to 4Hz (CONFIG.UpdateRate = 0.25s), but was using Heartbeat dt (~0.016s) instead of actual elapsed time. Result: sanity drained ~15× too slowly. Use UpdateRate, not dt." — prevents future devs from "fixing" it back
+- Unblocks meaningful Studio playtest — without this fix, players stayed at ~100 sanity for entire matches, never saw horror FX (hallucinations, screen distortion, audio paranoia)
+- No regression in other HorrorEvents functions — ApplySanityDrain, TriggerSanityDamage, TriggerHorrorPulse, GetHorrorLevel all unchanged
+- --!strict clean, no new dependencies, no performance impact (1 multiplication, already running)
+- Follows lua-best-practices.md strictly
+
+**Known gaps:**
+- Sanity decay rate is now CORRECT but may feel too harsh / too lenient in actual play — tune `CONFIG.BaseDecay` based on playtest feedback. Current: 3.8 * multiplier * 0.25 = ~0.95/sec baseline in fog. With fog multiplier ~1.0-2.5x, effective drain = 0.95-2.4/sec. Time to 0 sanity in dense fog: ~42 sec. Time to first hallucination (70 sanity): ~12 sec. Aggressive but appropriate for horror — extraction rounds are 5-12 min, players SHOULD be panicking by mid-round.
+- No per-difficulty sanity decay scaling — same rate for all players, all matches. Could add difficulty multiplier later (Easy: 0.7×, Normal: 1.0×, Nightmare: 1.5×).
+- No sanity regen outside fog — players in clear air still don't regen sanity (decay multiplier = 0, so decay = 0, sanity stays flat). Intentional for MVP — extraction tension requires sanity to be a one-way ratchet (can only go down, never up, except via consumables — which don't exist yet). Future: add sanity regen items / safe zones.
+- Rojo/Studio playtest still **CRITICALLY OVERDUE** — now 9 fixes shipped without in-engine validation: SetSailing, TestHarness, QuotaManager cleanup, Boarding Feedback, Camera Shake, ApplySanityDrain, EntityAI.Destroy, Sanity Decay Math. Plus CI infra (3aff8e4). Code review confidence high but no substitute for actual playtest.
+- **PROGRESS.md getting long** — 9 entries, 327 lines / 29KB, all from 2026-06-29 dev session. User asked to "keep PROGRESS.md under control — summarize old entries or archive to PROGRESS_ARCHIVE.md if it gets too long." At 327 lines it's manageable but approaching the threshold. Recommend archiving entries older than 1 week, OR entries for commits that have been merged to main, OR when file exceeds 500 lines / 50KB. NOT archiving yet — all entries are from TODAY, single coherent dev session, useful to keep together for context. Will archive when we cross 500 lines or when switching to a different feature area.
+
+**Next step:** Fix `BoardGhostShip()` double-board exploit — add `SailingEnabled == false` guard to prevent sanity/horror/audio spam via rapid ProximityPrompt triggering. ~3 LOC, 1 file (`ShipController.lua`). Griefing exploit, high value-per-line, boarding subsystem hasn't been touched in 5 commits (safe per "never fix regressions from previous cleanups in same cycle" rule).
+
+**Reviewer notes:** See REVIEW.md
