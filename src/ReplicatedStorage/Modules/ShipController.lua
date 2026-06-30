@@ -21,6 +21,7 @@ type ShipState = {
 	Weight: number,
 	LastInputTime: number,
 	SailingEnabled: boolean,
+	LastBoardTime: number,
 }
 
 local activeShips: {[Player]: ShipState} = {}
@@ -33,6 +34,7 @@ local CONFIG = {
 	MaxInputMagnitude = 1.2,
 	BoardingSanityDamage = 12,
 	BoardingHorrorPulse = 0.8,
+	BoardingDebounce = 1.5,
 }
 
 local function getOrCreateShip(player: Player): ShipState
@@ -43,6 +45,7 @@ local function getOrCreateShip(player: Player): ShipState
 			Weight = 0,
 			LastInputTime = 0,
 			SailingEnabled = true,
+			LastBoardTime = 0,
 		}
 		activeShips[player] = ship
 	end
@@ -121,6 +124,16 @@ function ShipController.BoardGhostShip(player: Player, ghostModel: Model, interi
 	if not character then return false end
 	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not root then return false end
+
+	-- Boarding exploit guard: prevent double-board / ProximityPrompt spam.
+	-- SailingEnabled check blocks re-entry while already docked.
+	-- Debounce blocks rapid spam during state transitions (HoldDuration = 0
+	-- on ProximityPrompt = instant trigger, player mashing E).
+	local ship = getOrCreateShip(player)
+	if not ship.SailingEnabled then return false end
+	local now = os.clock()
+	if now - (ship.LastBoardTime or 0) < CONFIG.BoardingDebounce then return false end
+	ship.LastBoardTime = now
 
 	-- Freeze ship movement
 	ShipController.SetSailing(player, false)
