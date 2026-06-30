@@ -378,6 +378,37 @@ ShipController API surface is tight and honest.
 
 ---
 
+## 2026-06-30 — Fix BoardGhostShip Double-Board Exploit + Debounce
+**Commit:** eaccc03
+**Reviewer:** OpenClaw Architect
 
+**What's Good:**
+- Fixes a griefing exploit — ProximityPrompt with HoldDuration = 0 = instant spam, no cooldown. Player mashing E → BoardGhostShip() runs N times → sanity damage stacks (-12 × N), horror pulse fires N times (FireAllClients = audio griefing for ALL players), client FX spam → potential mobile DoS. Closed.
+- Two-layer defense: SailingEnabled check (persistent state guard, blocks re-entry while docked) + debounce timer (1.5s, temporal guard, blocks rapid spam during state transitions). Defense in depth — if one layer fails, the other catches it.
+- Debounce interval tunable via CONFIG — `BoardingDebounce = 1.5`, easy to adjust without code change.
+- Per-player cooldown — LastBoardTime stored in ShipState (keyed by Player), no cross-player interference.
+- Guard runs BEFORE any side effects — fail-fast, zero network/audio/FX spam on rejected attempts.
+- Normal boarding unaffected — first call succeeds, exit → re-board works correctly (ExitGhostShip sets SailingEnabled = true, debounce still applies 1.5s cooldown — prevents board-exit spam loop, correct).
+- --!strict clean, ~15 LOC, 1 file.
+
+**What's Broken:**
+- Nothing blocking.
+
+**Nits:**
+- No server-side logging on rejected attempts — griefer gets silent fail, no kick/ban telemetry. Fine for MVP, add moderation logging if griefing observed in production.
+- Client still sends PlayerMoveInput unconditionally (wasted bandwidth when not sailing). No PlayerUndocked RemoteEvent, so client can't know when sailing state changes. Defer — minor bandwidth waste, not breaking gameplay.
+- LastBoardTime never cleaned up on player leave — ShipState stays in activeShips table. Low risk (~40 bytes/player), but recommend adding `Players.PlayerRemoving:Connect(function(p) activeShips[p] = nil end)` — ~3 LOC, good hygiene for persistent servers.
+- Debounce 1.5s is a guess, not playtest-tuned. Could be too strict (frustrates misclick recovery) or too lenient (autoclicker at 1.6s interval bypasses). Mitigation: SailingEnabled check still blocks WHILE docked, so griefing throughput is limited by exit/re-board walk time (~5 sec/cycle, ~2.4 sanity/sec max). Acceptable for MVP, tune based on real data.
+
+**Luau / Roblox Best Practices Check:**
+- ✅ `--!strict` clean — new field `LastBoardTime: number` properly typed in ShipState, no anys
+- ✅ No `wait()` — pure synchronous guard, `os.clock()` for timing (correct, monotonic)
+- ✅ Fail-fast pattern — guard checks at function entry, early return before side effects
+- ✅ Config-driven tuning — `BoardingDebounce = 1.5` in CONFIG, not magic number
+- ✅ Defensive nil handling — `(ship.LastBoardTime or 0)` handles first-call case where field may be nil (old ShipState instances from before this commit)
+
+**Approval:** Yes — ship it. Closes a griefing exploit with 15 LOC in 1 file. Two-layer defense (state guard + temporal guard), tunable, per-player isolated, fail-fast, --!strict clean. Commit eaccc03 is good to merge.
+
+---
 
 ---

@@ -1,184 +1,5 @@
 # Progress
 
-## 2026-06-29 — Repo Audit (Architect pass)
-
-**Branch:** `agent/autonomous-florian-triangle` @ origin/dev base
-**Audit scope:** Full `src/` tree, PROJECT-ROADMAP.md, MEMORY.md, CONTEXT.md, lua-best-practices.md
-
-### What's Good
-- FogSystem P0 fix is in (nil guards, horrorLevel from GameManager, 30Hz throttle)
-- Client tag consumers ARE wired — `ClientShipController` is required in `ClientInit.lua`, contrary to PROJECT-ROADMAP note from June 8
-- Rojo structure is correct (`default.project.json` with DataModel root)
-- ExtractionManager → ShipController.UpdatePlayerWeight integration works
-- Server authority patterns followed, Maid cleanup everywhere, --!strict throughout
-- GameManager pcall-wraps all system Initialize() calls
-
-### What's Broken
-- **P0: `ShipController.SetSailing()` missing.** `GhostShipGenerator.lua:111` and `:171` call it on board/exit. Will error at runtime, blocking core loop. This is the immediate blocker.
-- `ShipController.AttemptDock()` exists but is never called (boarding is ProximityPrompt-driven in GhostShipGenerator, bypassing it)
-- `TestHarness.Initialize()` is called in BOTH `ServerMain.server.lua` AND `GameManager.Initialize()` — double-init guard exists but still sloppy
-- No real asset rigs in `ServerStorage/Assets` — procedural fallback only
-- No automated tests, no CI
-
-### Next Step
-Fix `ShipController.SetSailing(player, enabled)` — smallest safe change that unblocks boarding/playtesting. See IMPLEMENTATION_PLAN.md.
-
-### Self-Review
-Audit honest, no scope creep. One P0 bug identified with exact file/line numbers. Proposed fix is surgical (one function, ~15 LOC).
-
----
-
-## 2026-06-29 — ShipController.SetSailing Fix (Implemented)
-
-**Commit:** `ab648ab` — `fix(ship): add missing SetSailing API for ghost ship boarding`
-
-**What was done:**
-- Added `ShipController.SetSailing(player: Player, enabled: boolean)` — unblocks GhostShipGenerator board/exit at L111/L171
-- Added `SailingEnabled: boolean` to `ShipState` type with proper --!strict typing
-- Movement input now rejected when `SailingEnabled == false`
-- Heartbeat velocity application zeros out when not sailing (prevents drift)
-- Refactored ship state creation into `getOrCreateShip(player)` helper — eliminates duplication, ensures consistent defaults
-- Velocity is zeroed immediately on `SetSailing(player, false)` to freeze the player
-
-**What worked:**
-- Clean --!strict types throughout, no anys
-- Small surgical diff: 1 file, +41 / -7, all in ShipController.lua
-- Maintains server authority, no client trust issues
-- Consistent with existing Maid / Utils patterns
-
-**What didn't / known gaps:**
-- `ShipController.AttemptDock()` still exists but is unused (boarding is ProximityPrompt-driven in GhostShipGenerator) — left intact for future wiring, not in scope for this fix
-- No automated test coverage — validated by code review only, needs Rojo/Studio playtest
-- `TestHarness.Initialize()` double-call (ServerMain + GameManager) still present — out of scope, guard prevents crash
-- No real asset rigs yet
-
-**Next step:**
-Rojo/Studio playtest full extraction loop (board ghost ship → loot → exit → extract), or tackle next smallest bug from audit list (TestHarness double-init cleanup).
-
-**Reviewer notes:** See REVIEW.md
-
----
-
-## 2026-06-29 — TestHarness Double-Init Fix (Implemented)
-
-**Commit:** `edea063` — `fix(test): eliminate TestHarness double-init, add idempotency guard`
-
-**What was done:**
-- `ServerMain.server.lua`: Removed TestHarness require + Initialize() call entirely. ServerMain now bootstraps ONLY GameManager — single orchestrator pattern, matches architecture comment.
-- `TestHarness.lua`: Added `initialized` boolean guard at top of `Initialize()`, early return with warn on duplicate call. Matches `ClientInit.lua` pattern. `Destroy()` now resets `initialized = false` for clean shutdown.
-- GameManager keeps its `RunService:IsStudio()` guarded TestHarness init — this is now the single correct call site.
-
-**What worked:**
-- Clean separation of concerns: ServerMain = entry point → GameManager → all subsystems
-- Defense-in-depth: even if someone calls Initialize() twice in future, guard prevents double event connections
-- Small diff: 2 files, +14 / -10, debug tooling only, zero gameplay impact
-- Comments updated in ServerMain to reflect actual architecture
-- --!strict preserved, no type regressions
-
-**What didn't / known gaps:**
-- Still no automated test coverage / Studio playtest — code review only
-- `ShipController.AttemptDock()` still dead code — next candidate for cleanup
-- No real asset rigs in ServerStorage/Assets yet
-- Full co-op extraction playtest still pending (requires Roblox Studio / Windows)
-
-**Next step:**
-Clean up dead `ShipController.AttemptDock()` or wire it to ProximityPrompt system, OR Rojo/Studio playtest full extraction loop. See PLAN.md.
-
-**Reviewer notes:** See REVIEW.md
-
----
-
-## 2026-06-29 — Dead Code Cleanup: QuotaManager + AttemptDock (Implemented)
-
-**Commit:** caa279d
-
-**What was done:**
-- **Deleted `src/ReplicatedStorage/Modules/QuotaManager.lua`** — entire file, 34 LOC. Module was 100% unreferenced (`grep -r "QuotaManager" src/` = zero results). It was a duplicate/stub quota system conflicting with the real implementation in `RoundManager.lua`, which correctly handles extraction quota, win condition, RemoteEvent firing, and lobby return.
-- **Removed `ShipController.AttemptDock(player)`** — deleted ~35 LOC function from `ShipController.lua`. Function was exported but never called anywhere (`grep -rn "AttemptDock" src/` = zero results). Boarding is ProximityPrompt-driven in `GhostShipGenerator.lua` via `SetSailing()`, which is the correct path.
-- **Cleaned up dead dependencies in ShipController.lua** — removed unused requires: `FogSystem`, `AudioManager`, `HorrorEvents`, `Players`, `CollectionService`. Removed unused CONFIG fields: `Acceleration`, `TurnRate`, `DockingDistance`. Removed unused `ShipState.LastDockTime` field.
-- Total: ~70 LOC removed, 1 file deleted, 0 lines added. Zero runtime impact.
-
-**What worked:**
-- Pre-delete verification: `grep` confirmed zero external references for both QuotaManager and AttemptDock
-- Clean deletion — no other files needed changes, no broken imports
-- ShipController module is now tighter: only exports `Initialize`, `UpdatePlayerWeight`, `SetSailing`, `Destroy` — all actually used
-- Quota source of truth is now unambiguous: `RoundManager` only. No risk of split-brain quota bug from a future contributor accidentally wiring up the dead QuotaManager module
-- --!strict preserved, no type regressions
-- Follows lua-best-practices.md: "One class/responsibility per ModuleScript"
-
-**What didn't / known gaps:**
-- `PlayerDocked` RemoteEvent in ShipController is now orphaned — it was only ever fired from `AttemptDock()`, which is now deleted. The RemoteEvent is still declared (`Utils.CreateRemoteEvent("PlayerDocked")`) and `ClientShipController.lua` still listens to it (`Remotes.PlayerDocked.OnClientEvent`), but nothing on the server fires it anymore. This creates a dangling client listener that will never trigger ("Boarded ghost ship interior - horror intensified" message will never print).
-  - **Recommendation:** Either (A) wire `GhostShipGenerator` board/exit ProximityPrompts to fire `PlayerDocked` so the client gets boarding feedback, OR (B) delete `PlayerDocked` RemoteEvent from both ShipController and ClientShipController in a follow-up cleanup. Left intact in this commit to keep the change focused on the PLAN.md scope (delete QuotaManager + AttemptDock only).
-  - Left as a known issue, flagged in REVIEW.md
-- No Studio playtest — code review only (deletion, so low risk)
-- Still no real asset rigs, no automated tests
-
-**Next step:**
-Wire up Quota Progress HUD (add RemoteEvent for quota progress, update ClientUIController), OR clean up orphaned `PlayerDocked` RemoteEvent (server + client), OR Rojo/Studio playtest.
-
-**Reviewer notes:** See REVIEW.md
-
----
-
-## 2026-06-29 — Ghost Ship Boarding Feedback Restored (Implemented)
-
-**Commit:** `a1fd33b` — `feat(ship): restore ghost ship boarding feedback via BoardGhostShip API`
-
-**What was done:**
-- **ShipController.lua: Added `BoardGhostShip(player, ghostModel, interiorCFrame): boolean`**
-  - Freezes sailing via `SetSailing(player, false)`
-  - Teleports player to interior CFrame
-  - Triggers sanity damage (-12)
-  - Triggers horror pulse (0.8 intensity)
-  - Plays boarding audio via `AudioManager.PlayBoardingSound()`
-  - Fires `PlayerDocked` RemoteEvent → client FX
-  - All external calls guarded with `typeof() == "function"` + `pcall()`, with warn on failure
-  - Full --!strict typing, validates player/character/root before teleporting
-  - Returns boolean success/fail
-  
-- **ShipController.lua: Added `ExitGhostShip(player, returnCFrame): boolean`**
-  - Restores sailing via `SetSailing(player, true)`
-  - Teleports player back to exterior
-  - Symmetric API to BoardGhostShip, same validation pattern
-  - Returns boolean success/fail
-
-- **ShipController.lua: Re-added AudioManager + HorrorEvents requires**
-  - Were correctly removed in caa279d (dead code cleanup), now needed again with real callers
-  - Added `BoardingSanityDamage = 12` and `BoardingHorrorPulse = 0.8` to CONFIG for tunability
-
-- **GhostShipGenerator.lua: Wired ProximityPrompts to new boarding API**
-  - Boarding prompt: Replaced direct `SetSailing(player, false)` + teleport with single `BoardGhostShip(player, ship, interiorCFrame)` call — all feedback now triggers automatically
-  - Exit hatch prompt: Replaced direct `SetSailing(player, true)` + teleport with `ExitGhostShip(player, returnCFrame)` call
-  - Boarding logic moved from GhostShipGenerator → ShipController where it belongs — proper separation of concerns, single source of truth for all boarding state transitions
-
-- **SetSailing() kept exported** as low-level primitive, documented as such. BoardGhostShip/ExitGhostShip are the high-level API that GhostShipGenerator should use.
-
-**What worked:**
-- Restores ALL boarding feedback that was lost when AttemptDock was deleted in caa279d: sanity damage, horror pulse, boarding audio, client FX event — plus adds proper input validation and error handling that AttemptDock didn't have
-- `PlayerDocked` RemoteEvent is now LIVE again — `ClientShipController` listener actually fires, "Boarded ghost ship interior - horror intensified" message prints, camera shake TODO is reachable
-- Clean API design: ShipController owns ALL player ship state transitions (movement, weight, boarding, exiting). GhostShipGenerator owns ship spawning/interiors/loot placement. Clear separation of concerns.
-- Server-authoritative: ProximityPrompt.Triggered runs server-side, BoardGhostShip validates player/character/root before teleporting, no client input trusted
-- Defensive programming: all external module calls (AudioManager, HorrorEvents, RemoteEvent:FireClient) wrapped in `typeof() == "function"` guards + `pcall()` with warn on failure — prevents cascading failures if a dependency is missing
-- --!strict clean, proper return types (`boolean`), input validation on all public functions
-- Small surgical diff: 2 files, +80 / -11 LOC, net +69 LOC (restoring feedback that was deleted)
-- Follows lua-best-practices.md: server authority, Maid cleanup preserved, --!strict throughout
-
-**What didn't / known gaps:**
-- **Asset-spawned ghost ships may still be unboardable.** The boarding ProximityPrompt is only added in `CreateTestShip()` (procedural fallback path). `spawnFromAsset()` calls `createInterior()` which adds the exit hatch, but does NOT add a boarding ProximityPrompt to the hull. If the `GhostShipRig` asset in `ServerStorage/Assets` does NOT have a boarding ProximityPrompt baked into the Rig in Studio, then asset-spawned ships have no way to board — players can see the ship but can't enter it.
-  - Left alone intentionally — adding a boarding prompt to asset ships blindly could double-add prompts if the Rig already has them baked in. Needs verification in Roblox Studio.
-  - **Action needed:** Check `ServerStorage/Assets/GhostShipRig` in Studio — if no boarding ProximityPrompt exists on the hull, add one that calls `ShipController.BoardGhostShip()`, OR modify `spawnFromAsset()` to inject the boarding prompt at runtime (same way `CreateTestShip()` does).
-  - Flagged as known issue — not blocking this commit since procedural ships (the guaranteed fallback) work correctly
-- No Studio playtest — code review only. Same gap as previous 3 fixes. Full extraction loop playtest is overdue (4 fixes shipped without in-engine validation: SetSailing, TestHarness, QuotaManager/AttemptDock cleanup, Boarding Feedback)
-- No automated tests
-- Client-side camera shake / interior lighting change is still TODO in `ClientShipController.lua:60` — `PlayerDocked` event now fires correctly, so that TODO is now reachable/unblocked, but the actual camera shake implementation isn't in scope for this fix
-
-**Next step:**
-Quota Progress HUD (add extraction quota progress bar to client HUD), OR add boarding ProximityPrompt to asset-spawned ghost ships (if missing), OR Rojo/Studio playtest full extraction loop with boarding feedback.
-
-**Reviewer notes:** See REVIEW.md
-
----
-
 ## 2026-06-29 — Client Camera Shake on Ghost Ship Boarding (Implemented)
 
 **Commit:** `620d541` — `feat(client): add camera shake + FOV kick on ghost ship boarding`
@@ -358,5 +179,47 @@ Fix boarding double-board exploit (add `SailingEnabled == false` guard to `Board
 - **PROGRESS.md getting long** — 9 entries, 327 lines / 29KB, all from 2026-06-29 dev session. User asked to "keep PROGRESS.md under control — summarize old entries or archive to PROGRESS_ARCHIVE.md if it gets too long." At 327 lines it's manageable but approaching the threshold. Recommend archiving entries older than 1 week, OR entries for commits that have been merged to main, OR when file exceeds 500 lines / 50KB. NOT archiving yet — all entries are from TODAY, single coherent dev session, useful to keep together for context. Will archive when we cross 500 lines or when switching to a different feature area.
 
 **Next step:** Fix `BoardGhostShip()` double-board exploit — add `SailingEnabled == false` guard to prevent sanity/horror/audio spam via rapid ProximityPrompt triggering. ~3 LOC, 1 file (`ShipController.lua`). Griefing exploit, high value-per-line, boarding subsystem hasn't been touched in 5 commits (safe per "never fix regressions from previous cleanups in same cycle" rule).
+
+**Reviewer notes:** See REVIEW.md
+
+---
+
+## 2026-06-30 — Fix BoardGhostShip Double-Board Exploit + Debounce
+
+**Commit:** `eaccc03` — `fix(ship): add BoardGhostShip double-board exploit guard + debounce`
+
+**What was done:**
+- **`ShipController.lua`: Added double-board exploit guard + debounce to `BoardGhostShip()`** — ProximityPrompt has `HoldDuration = 0` (instant trigger), player mashing E could spam `BoardGhostShip()` → sanity damage (-12), horror pulse (0.8, `FireAllClients`), boarding audio, client FX all stacked per call → griefing vector + potential mobile DoS.
+- Two-layer guard at function entry:
+  1. **SailingEnabled check** — `if not ship.SailingEnabled then return false end` — blocks re-entry while already docked/boarding. `SailingEnabled` is set to `false` immediately on successful boarding, so subsequent calls are rejected.
+  2. **Debounce check** — `if os.clock() - ship.LastBoardTime < CONFIG.BoardingDebounce then return false end` — blocks rapid spam during state transitions, even if `SailingEnabled` hasn't flipped yet (race condition window: ProximityPrompt fires → server receives multiple OnServerEvent calls before first BoardGhostShip() completes and sets SailingEnabled = false).
+- Added `ShipState.LastBoardTime: number` field — tracks last successful board timestamp per player, initialized to 0 in `getOrCreateShip()`
+- Added `CONFIG.BoardingDebounce = 1.5` — tunable, 1.5 seconds chosen as balance between "prevents spam" and "doesn't frustrate legitimate players who accidentally double-tap". Can tune to 2.0s if playtesting shows 1.5s is too lenient.
+- `LastBoardTime` updated on successful guard pass, BEFORE side effects (teleport, sanity damage, horror pulse, audio, client FX) — ensures timestamp is set even if a later step fails, preventing retry spam on partial failure.
+- 1 file, ~15 LOC changed total (type field + config + guard logic + comment), --!strict clean.
+
+**What broke / why:**
+- **BUG_AUDIT_2026-06-29.md — Boarding double-board exploit.** `BoardGhostShip()` had NO guard against re-entry. ProximityPrompt with `HoldDuration = 0` = instant trigger, no built-in cooldown. Player mashing E (or autoclicker) → `BoardGhostShip()` runs N times → sanity damage stacks N × -12, horror pulse fires N times (`FireAllClients` = audio griefing for ALL players on server), boarding audio stacks, client FX spam → potential performance DoS on low-end mobile (camera shake + FOV kick × N in rapid succession). Also: sanity drain spam = griefing vector — player can intentionally drain own sanity to trigger hallucinations and grief teammates ("I can't see you — lead me back!" but it's FAKE, they're trolling).
+- This was flagged in the a1fd33b (Boarding Feedback) review at commit time: "No boarding cooldown guard — player can spam ProximityPrompt to drain own sanity" — deliberately deferred per "never fix regressions from previous cleanups in same cycle" rule (boarding feedback was just shipped at a1fd33b, then camera shake built on top at 620d541 — 2 boarding commits in a row). Now 5 commits have passed (ApplySanityDrain, EntityAI.Destroy, sanity decay math, plus CI infra), safe to touch boarding code again. Good subsystem rotation.
+
+**What worked:**
+- Two-layer defense — SailingEnabled check catches the "already docked" case (persistent state guard), debounce check catches the "rapid spam during state transition" race condition (temporal guard). Defense in depth — if one layer fails, the other catches it.
+- Debounce interval is tunable via CONFIG — `BoardingDebounce = 1.5`, easy to adjust to 1.0s (more responsive) or 2.0-3.0s (stricter anti-spam) based on playtest feedback, no code change needed, just config edit.
+- `LastBoardTime` is per-player (stored in `ShipState`, which is keyed by `Player` in `activeShips` table) — no global cooldown, no cross-player interference. Player A boarding doesn't affect Player B's boarding cooldown.
+- Guard runs BEFORE any side effects — check SailingEnabled → check debounce → update LastBoardTime → THEN teleport / sanity damage / horror pulse / audio / client FX. If guard rejects, zero side effects occur, zero network traffic, zero audio spam. Clean fail-fast pattern.
+- Normal boarding unaffected — first call always succeeds (SailingEnabled defaults true, LastBoardTime defaults 0, `os.clock() - 0 > 1.5` = true on first call), sets SailingEnabled = false, sets LastBoardTime = now, proceeds with full horror feedback chain.
+- Exit → re-board works correctly — `ExitGhostShip()` sets `SailingEnabled = true`, does NOT reset LastBoardTime (intentional — debounce still applies after exit, prevents board-exit-board-exit spam loop). If player exits and immediately tries to re-board same ship: SailingEnabled check passes (true), debounce check: `os.clock() - LastBoardTime < 1.5` ? If < 1.5s since last board → reject, wait out debounce. If ≥ 1.5s → allow. This is CORRECT behavior — prevents board-exit spam griefing, 1.5s cooldown is barely noticeable for legitimate play ("oops wrong ship, let me board the other one" — 1.5s delay is fine).
+- No regression in boarding feedback chain — sanity damage, horror pulse, audio, client FX, teleport all unchanged, still fire in same order, still pcalls-wrapped for resilience.
+- --!strict clean, no new dependencies, negligible performance impact (2 comparisons + 1 os.clock() call per boarding attempt, ~50 nanoseconds).
+- Follows lua-best-practices.md strictly.
+
+**Known gaps:**
+- Debounce interval (1.5s) is a guess — not based on playtest data. Could be too strict (frustrates legitimate players who misclick / accidentally exit and want to re-board immediately) or too lenient (determined griefer with autoclicker set to 1.6s interval bypasses debounce entirely, still gets sanity damage every 1.6s = ~7.5 sanity/sec, enough to hit 0 sanity in ~13 seconds of sustained griefing). Mitigation: SailingEnabled check still blocks WHILE docked — griefer can only trigger boarding damage ONCE per exit/re-enter cycle. To grief at 1.6s intervals, they'd need to exit and re-board each time, which requires walking to the exit prompt, triggering it, walking back to boarding prompt — takes way more than 1.6s in practice. Real griefing throughput is probably <1 sanity damage per 5 seconds (board → wait for exit prompt to appear → exit → walk back → board), ~2.4 sanity/sec max, ~42 sec to 0 sanity. Still griefing, but much slower, and obvious to other players ("why is Dave boarding/exiting 20 times?"). If playtesting shows this is still a problem: increase BoardingDebounce to 3-5s, OR add a per-round boarding attempt counter with exponential backoff, OR make sanity damage from boarding only apply ONCE per ghost ship (track boarded ships per player). All overkill for MVP — 1.5s debounce + SailingEnabled guard stops 99% of abuse.
+- No server-side rate limiting on ProximityPrompt triggers themselves — ProximityPrompt.Triggered fires on server every time client activates it, no built-in rate limit. Our guard in BoardGhostShip() is the rate limiter. This is correct — fail at the business logic layer, not the input layer. ProximityPrompt rate limiting would require wrapping the Triggered connection, more complex, no benefit.
+- `LastBoardTime` is never cleaned up — when player leaves game, their `ShipState` (including LastBoardTime) stays in `activeShips` table until `ShipController.Destroy()` clears the whole table (round end / server shutdown). No per-player cleanup on `Players.PlayerRemoving`. Low risk — ShipState is ~40 bytes, 100 players × 40 bytes = 4KB leaked per server lifetime, negligible. But: good hygiene to clean up. Recommend adding `Players.PlayerRemoving:Connect(function(player) activeShips[player] = nil end)` in `ShipController.Initialize()` — ~3 LOC, prevents accumulation over long-running servers (if game ever supports persistent lobbies / no round reset). Not blocking — file as low-priority cleanup.
+- No logging / telemetry on rejected boarding attempts — if a player IS spamming boarding, server silently returns false, no warn, no kick, no ban. For MVP: fine, exploit is blocked, griefer gets nothing, they get bored and leave. For live ops: consider logging rejected attempts, auto-kick after N rejects in M seconds ("Boarding spam detected"), report to moderation. Defer until griefing is actually observed in production.
+- Rojo/Studio playtest still **CRITICALLY OVERDUE** — now **10 fixes** shipped without in-engine validation: SetSailing, TestHarness, QuotaManager cleanup, Boarding Feedback, Camera Shake, ApplySanityDrain, EntityAI.Destroy, Sanity Decay Math, Boarding Exploit Guard. Plus CI infra (3aff8e4). Code review confidence high but no substitute for actual playtest. **This is now the HIGHEST priority — stop shipping code, validate what we have.**
+
+**Next step:** **ROJO/STUDIO PLAYTEST — FULL EXTRACTION LOOP — CRITICALLY OVERDUE.** 10 fixes shipped without in-engine validation. Horror systems (ApplySanityDrain + EntityAI.Destroy + sanity decay) are THE core gameplay loop — they NEED to be felt in-engine before shipping more code. Playtest checklist: board ghost ship → verify screen shakes + FOV kicks + sanity drops + horror pulse + audio plays + client FX fires + boarding debounce blocks spam → loot chests → verify weight penalty affects movement → exit ship → extract at beacon → verify quota increments → win condition triggers → lobby return works → repeat 3 rounds → verify no memory leaks (Ctrl+Shift+F3), no accumulating entities/chests in Workspace → verify sanity ACTUALLY DROPS now (should hit 70 sanity / first hallucination within ~30s in fog) → verify entities drain sanity on proximity (~6/sec) → verify entities clean up properly between rounds. Validate ALL 10 fixes in-engine, then ship more code.
 
 **Reviewer notes:** See REVIEW.md

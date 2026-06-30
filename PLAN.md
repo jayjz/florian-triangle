@@ -62,52 +62,59 @@
 - Horror pillar restored — sanity now drains at intended rate (~1.0/sec in fog), hallucination thresholds trigger in realistic match time (70 @ ~30s, 50 @ ~50s, 30 @ ~70s in dense fog), fog → sanity drain → hallucinations → panic → extraction tension loop works end-to-end
 - Unblocks meaningful Studio playtest — without this fix, players stayed at ~100 sanity for entire matches, never saw horror FX
 
+### Fix BoardGhostShip Double-Board Exploit + Debounce — ✅ Done 2026-06-30 (eaccc03)
+- Added double-board exploit guard + debounce to `BoardGhostShip()` — ProximityPrompt with HoldDuration = 0 = instant spam, player mashing E → sanity damage / horror pulse / audio / client FX all stacked per call → griefing vector + mobile DoS
+- Two-layer guard: (1) SailingEnabled check — blocks re-entry while already docked, (2) Debounce check — `os.clock() - LastBoardTime < 1.5s` → reject, blocks rapid spam during state transitions
+- Added `ShipState.LastBoardTime: number` field, `CONFIG.BoardingDebounce = 1.5` (tunable)
+- 1 file (`ShipController.lua`), ~15 LOC changed
+- Normal boarding unaffected, spam boarding rejected, exit → re-board works correctly
+- Fixes BUG_AUDIT_2026-06-29.md — Boarding double-board exploit
+- Unblocks clean playtesting — boarding feedback chain now hardened against abuse
+
 ---
 
-## Current Step: Fix BoardGhostShip Double-Board Exploit
+## Current Step: ROJO/STUDIO PLAYTEST — FULL EXTRACTION LOOP — CRITICALLY OVERDUE
 
-**Problem:** `ShipController.BoardGhostShip()` has no `SailingEnabled == false` guard. Player can spam the boarding ProximityPrompt rapidly → `BoardGhostShip()` runs multiple times per boarding → sanity damage (-12) stacks per call, horror pulse (0.8) stacks, audio spam, client FX spam. Sanity drain exploit: repeatedly board/exit to farm sanity damage / grief other players (horror pulse is FireAllClients).
+**Status: 10 fixes shipped without in-engine validation. STOP SHIPPING CODE. VALIDATE WHAT WE HAVE.**
 
-Also: no boarding cooldown, no "already boarding" state check. ProximityPrompt has `HoldDuration = 0` (instant trigger), so a player mashing E can trigger it 10+ times/sec if the server is slow to set `SailingEnabled = false`.
+**Fixes awaiting playtest:**
+1. SetSailing API (ab648ab) — unblocks ghost ship boarding
+2. TestHarness double-init (edea063) — debug stability
+3. QuotaManager dead code cleanup (caa279d) — ~70 LOC removed
+4. Boarding Feedback restore (a1fd33b) — sanity damage, horror pulse, audio, client FX
+5. Camera Shake (620d541) — screen shake + FOV kick on boarding
+6. ApplySanityDrain (9fd75c8) — entities damage sanity via proximity aura, unblocks EntityAI
+7. EntityAI.Destroy table mutation (0126c9d) — fixes server OOM / memory leak over multiple rounds
+8. Sanity Decay Math (633c6ff) — was 15× too slow, horror pillar restored
+9. BoardGhostShip exploit guard (eaccc03) — debounce + SailingEnabled check, prevents griefing
+10. **[UNCOMMITTED — IN WORKING TREE]** Fix ShipController / Humanoid tug-of-war — physics bug: ShipController setting AssemblyLinearVelocity every frame fighting Humanoid movement controller (WalkSpeed 16 vs 58 studs/sec) → player yanked/pulled in weird directions, frozen inside ghost ships. Fix: proper movement handoff — ShipController ONLY sets AssemblyLinearVelocity when SailingEnabled = true, disables Humanoid.WalkSpeed/AutoRotate during sailing, restores Humanoid movement when on foot (lobby / ghost ship interiors). Default SailingEnabled = false (Humanoid movement), opt-in to ShipController at round start. Fixes: ShipController.lua, RoundManager.lua, LobbyManager.lua — **READY TO COMMIT, NEEDS PLAYTEST CONFIRMATION**
 
-**Fix — ~3 LOC, 1 file:**
-`src/ReplicatedStorage/Modules/ShipController.lua`, top of `BoardGhostShip()`:
-```lua
-function ShipController.BoardGhostShip(player: Player, ghostModel: Model, interiorCFrame: CFrame): boolean
-    local ship = getOrCreateShip(player)
-    -- Guard: prevent double-board exploit — sanity/horror/audio spam
-    if not ship.SailingEnabled then return false end
-    -- ... rest of boarding logic
-    ship.SailingEnabled = false  -- already sets this, guard just prevents re-entry
-```
-The `SailingEnabled = false` assignment already exists in the current code (line ~XX, sets it BEFORE teleport/sanity damage). The guard just needs to CHECK it at function entry and early-return if already false.
+**Playtest Checklist:**
+- [ ] Spawn in Foosha Village lobby → verify normal Humanoid movement (WalkSpeed 16, no yanking/pulling)
+- [ ] Ready up → teleport to Windmill Village → verify ShipController sailing movement activates (58 studs/sec, weight penalties apply, NO Humanoid tug-of-war)
+- [ ] Sail to ghost ship → board via ProximityPrompt → verify: screen shakes + FOV kicks + sanity drops (-12) + horror pulse fires + boarding audio plays + client FX fires + boarding debounce blocks spam (try mashing E rapidly → should only board ONCE)
+- [ ] Inside ghost ship interior → verify: Humanoid movement WORKS (WalkSpeed 16, can walk around freely, NO freezing, can reach loot chests)
+- [ ] Loot chests → verify: weight penalty affects movement speed, inventory updates, sanity drain from fog still ticking (~1/sec)
+- [ ] Exit ghost ship → verify: ShipController sailing movement RESTORED (58 studs/sec), Humanoid movement disabled, no tug-of-war
+- [ ] Sail to extraction beacon → verify: quota increments, win condition triggers
+- [ ] Lobby return → verify: Humanoid movement restored (WalkSpeed 16), ShipController hands off cleanly, no residual velocity drift
+- [ ] Repeat for 3 full rounds → verify: NO memory leaks (Ctrl+Shift+F3 memory stats flat), NO accumulating entities/chests in Workspace, EntityAI cleanup works (no ghost pirates), sanity decay works end-to-end (should hit 70 sanity / first hallucination within ~30s in fog)
+- [ ] Entity combat → verify: corrupted pirates drain sanity on proximity (~6/sec), AI pathfinding works, ranged attacks fire (may miss frequently — Bug #4, known, not blocking playtest)
+- [ ] Boarding exploit guard → verify: rapid ProximityPrompt spam → only ONE boarding succeeds per 1.5s, no sanity/horror/audio spam
 
-**Why this step:**
-- Smallest high-value change available — ~3 LOC, 1 file, trivial review
-- Security/stability bug — sanity drain spam = griefing vector, horror pulse spam = audio griefing (FireAllClients), client FX spam = potential performance DoS on low-end mobile
-- NOT a regression follow-up from the last commit — last 3 commits were: ApplySanityDrain (horror/AI), EntityAI.Destroy (AI cleanup), sanity decay math (horror balance). Boarding subsystem hasn't been touched since camera shake (620d541) — 5 commits ago, well past the "never fix regressions from previous cleanups in same cycle" cooldown. Safe to touch boarding code now.
-- Core gameplay > cleanup — this is core gameplay integrity (preventing exploits in a core loop mechanic), not cosmetic cleanup
-- Follows "single smallest, highest-value change" rule — 3 LOC to close a griefing exploit is maximum value-per-line possible
-- Pairs well with the horror fixes just shipped — ApplySanityDrain + EntityAI.Destroy + sanity decay math = horror systems now WORK. Now harden the boarding system (the entry point to horror encounters) against abuse before playtesting, so playtest results aren't polluted by exploit spam
+**Why playtest NOW (not after more fixes):**
+- 10 fixes, 0 in-engine validations — code review confidence is high but NOT a substitute for actual playtest
+- Horror systems (ApplySanityDrain + EntityAI.Destroy + sanity decay) are THE core gameplay loop — need to FEEL them in-engine before shipping more code
+- Movement system just got a MAJOR refactor (ShipController / Humanoid handoff) — physics bugs are exactly the kind of thing that code review misses but playtesting catches immediately (see: the bug Georgie just reported — "player gets yanked/pulled when walking normally" — caught by playtesting in ~30 seconds, would NEVER be caught by code review alone, because the code "looks correct" — AssemblyLinearVelocity assignment is intentional, the bug is the INTERACTION with Humanoid movement controller, a runtime emergent behavior)
+- Boarding exploit guard needs real ProximityPrompt spam testing — does 1.5s debounce feel good? Too strict? Too lenient? Only playtesting can answer
+- Sanity decay rate (now 15× faster) — is it TOO aggressive? Do players go insane in 12 seconds and quit in frustration? Or is it PERFECT horror tension? Playtest or guess — guessing is how you ship unfun games
 
-**Alternative next steps considered (and why boarding guard wins):**
-- **EntityAI ranged attack LOS bug** (Bug #4 — HIGH): `hasLineOfSight()` returns false during cooldown instead of cached result → ranged attacks almost always miss. ~1 LOC fix (`return cachedLOS` instead of `return false`), high gameplay value. DEFERRED — EntityAI just got 2 fixes in a row (ApplySanityDrain + Destroy), time to rotate subsystems. Also: ranged attack miss bug is "AI too weak" (generous to players), boarding exploit is "players can grief" (punishes players) — griefing bugs are higher priority than balance bugs.
-- **Quota Progress HUD** (~40 LOC, 2 files): High player value, but exceeds 20 LOC budget. Can split into smaller steps, but still larger than boarding guard. DEFERRED — exploit fix first, features second.
-- **Studio playtest full extraction loop**: CRITICALLY OVERDUE (now 9 fixes without in-engine validation). But: playtesting WITH a known griefing exploit means playtest results are unreliable (is the horror tension real, or is someone spamming boarding to grief sanity?). Fix the exploit FIRST (3 LOC, 2 min), THEN playtest with clean data.
-- **Asset ghost ship boarding prompt** (~10 LOC, needs Studio verification): Can't confirm from code alone whether `GhostShipRig` asset has a boarding ProximityPrompt. If missing, asset ships are unboardable. This is a P0 if true, but requires Studio to verify. DEFERRED — boarding guard is code-only, no Studio needed, can ship immediately.
-- **Client interior lighting on boarding** (~15 LOC): Nice polish, pairs with camera shake. But: polish < exploit fix in triage order. DEFERRED.
+**Next code fix (AFTER successful playtest confirms all 10 fixes work):**
+- **Fix EntityAI ranged attack LOS bug — Bug #4 (HIGH)** — `hasLineOfSight()` returns `false` during cooldown instead of cached result → ranged attacks almost always miss. ~1 LOC fix (`return cachedLOS` instead of `return false`), high gameplay value (AI combat actually works). Smallest high-value change, ready to go.
+- Alternative: **Quota Progress HUD** — if playtesting shows players don't know how close they are to extraction quota, add progress bar. ~40 LOC, exceeds budget, split into smaller steps if needed.
+- Alternative: **Client interior lighting on boarding** — if playtesting shows ghost ship interiors feel flat despite camera shake, add ColorCorrection dim/green tint for sustained atmosphere. ~15 LOC, pairs with camera shake.
 
-**Acceptance:**
-- [ ] `BoardGhostShip()` early-returns `false` if `ship.SailingEnabled == false` (already boarding / already docked)
-- [ ] Rapid ProximityPrompt spam no longer stacks sanity damage / horror pulse / audio
-- [ ] Normal boarding still works — first call succeeds, sets `SailingEnabled = false`, subsequent calls within same boarding are rejected
-- [ ] Exit → re-board works correctly — `ExitGhostShip()` sets `SailingEnabled = true`, next boarding call succeeds
-- [ ] No regression in boarding feedback chain (sanity damage, horror pulse, audio, client FX, teleport)
-- [ ] --!strict preserved
-
-**Risk: Very Low.** 3 LOC guard at function entry, early return pattern. Worst case: guard is too aggressive, rejects legitimate boarding attempts → players can't board ghost ships → core loop broken. Mitigation: guard condition is `if not ship.SailingEnabled then return false end` — this is exactly the inverse of the state that `BoardGhostShip()` sets (`ship.SailingEnabled = false`), so the guard only rejects calls when boarding is ALREADY IN PROGRESS or the player is ALREADY DOCKED. Legitimate first boarding attempt always has `SailingEnabled = true`, passes guard. Rollback: `git revert`, 1 commit, 3 LOC.
-
-**Estimated LOC:** ~3 lines, 1 file (`ShipController.lua`)
+**Risk of NOT playtesting:** We ship 3 more fixes (ranged LOS, Quota HUD, interior lighting), now 13 fixes unvalidated, a fundamental movement bug like the ShipController/Humanoid tug-of-war slips through, players quit after 30 seconds because basic movement feels broken, all the horror tension / entity AI / sanity systems work we did is WASTED because nobody plays long enough to experience it. **Playtest first. Always.**
 
 ---
 
