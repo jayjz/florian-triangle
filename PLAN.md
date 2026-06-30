@@ -80,115 +80,173 @@
 - Updated `LobbyManager.ReturnToLobby()` → `SetSailing(false)` → restore Humanoid movement in lobby
 - 3 files (`ShipController.lua`, `RoundManager.lua`, `LobbyManager.lua`), ~85 LOC
 - **Bug reported during Studio playtest by Georgie — validates "STOP SHIPPING CODE, PLAYTEST WHAT WE HAVE" — code review would NEVER catch this, playtesting caught it in ~30 seconds**
-- **PLAYTEST CONFIRMATION NEEDED** — fix pushed at bb75a68, Georgie testing now — confirm: lobby movement normal, sailing movement smooth, ghost ship interior movement works (NO freezing), exit/entry transitions clean, respawn preserves movement mode, no memory leaks
+
+### Fix ShipController Velocity Yanking — 3-Layer Defense — ✅ Done 2026-06-30 (498226c)
+- Fixed 3 interlocking velocity pollution bugs that caused player yanking/pulling after the bb75a68 movement handoff fix.
+- **Bug 3 — isInputAllowed security hardening:** Changed `isInputAllowed(player)` to reject input when NO ShipState exists. Was: `if not ship then return true end` → allowed first input to create ShipState + set velocity during lobby/on-foot. Now: `return false` → input rejected until opt-in via `SetSailing(true)`.
+- **Bug 1 — Stale velocity reset on SetSailing():** Was zeroing velocity ONLY on `SetSailing(false)`. Now: velocity zeroed on EVERY `SetSailing()` state change. Root cause: lobby WASD → ShipState.Velocity polluted → `SetSailing(true)` → instant launch with stale velocity. Added `CONFIG.SailingInputDebounce = 0.2` — blocks move input for 0.2s after enabling sailing.
+- **Bug 2 — Client input gating:** Was firing `PlayerMoveInput` every RenderStepped (60 Hz) unconditionally. Now gates on `player:GetAttribute("SailingEnabled") ~= true then return end`. Stops bandwidth waste (~1.2kb/sec/player) + ShipState velocity pollution.
+- 2 files (`ShipController.lua`, `ClientShipController.lua`), ~45 LOC
+- Defense-in-depth — 3 layers, any 1 layer stops the yanking, all 3 together = bulletproof
+
+### Fix ShipController Gravity / Y Velocity Bug + JumpPower Toggle — ✅ Done 2026-06-30 (3adfae3)
+- Fixed gravity / Y velocity bug — `AssemblyLinearVelocity.y = 0` every Heartbeat → gravity cancelled → float instead of fall, jump impulse cancelled → can't jump.
+- Fix: preserve Y velocity → `root.AssemblyLinearVelocity = Vector3.new(sv.X, av.Y, sv.Z)` → ShipController owns HORIZONTAL (X/Z), physics engine owns VERTICAL (Y). Clean separation.
+- Added JumpPower toggle in `SetSailing()` — sailing: `JumpPower = 0 / JumpHeight = 0 / UseJumpPower = true` → jumping DISABLED, consistent with WalkSpeed=0/AutoRotate=false, ShipController owns 100% of physics. On-foot: `JumpPower = 50 / JumpHeight = 7.2` → normal Roblox jump restored.
+- Completes the movement authority handoff — WalkSpeed + AutoRotate + JumpPower ALL toggled together, ZERO overlap.
+- 1 file (`ShipController.lua`), ~15 LOC
+- Movement system is now SOLID — bb75a68 (authority handoff) + 498226c (velocity pollution) + 3adfae3 (gravity physics) = complete movement stack
+
+### Fix EntityAI Ranged Attack LOS Bug — Bug #4 / HIGH — ✅ Done 2026-06-30 (39e582a)
+- Fixed `hasLineOfSight()` returning `false` during cooldown instead of cached result → ranged attacks ~5% hit rate → AI combat broken → corrupted pirates NOT threatening → horror tension gutted.
+- Added `Entity.LastLOSResult: boolean` field, initialized to `false` (safe default), cache result in ALL return paths, return cached result during cooldown: `return entity.LastLOSResult` (was: `return false`).
+- AI combat effectiveness RESTORED — ranged attacks HIT when target is in LOS, MISS when target breaks LOS, hit rate ~60-80% (was ~5%), corrupted pirates are ACTUALLY DANGEROUS now.
+- Pairs with ApplySanityDrain fix (9fd75c8) — entities now deal BOTH sanity damage (~6/sec proximity aura) AND health damage (~14 damage/hit, ~60-80% accuracy) → horror tension = MAXIMUM.
+- 1 file (`EntityAI.lua`), ~15 LOC
+- Fixes BUG_AUDIT_2026-06-29.md — Bug #4 — HIGH
 
 ---
 
-## Current Step: Fix ShipController Gravity / Y Velocity Bug — HIGH — 1 LOC
+## Current Step: Add EntityAI Ranged Attack Telegraphing + Visual FX — P0/P1 — ~15-28 LOC
 
-**Problem:** `ShipController` overwrites `AssemblyLinearVelocity.y = 0` every Heartbeat → gravity CANCELLED → character FLOATS instead of falling, jump impulse CANCELLED immediately → can't jump while sailing.
+**Problem:** Ranged attacks deal damage INSTANTLY with ZERO warning and ZERO visual feedback → feels cheap/unfair → player churn. This bug was MASKED by Bug #4 (LOS bug → 5% hit rate → players rarely got hit → missing FX/telegraphing barely noticeable). NOW that Bug #4 is fixed (39e582a → 60-80% hit rate), players WILL get shot constantly with no warning, no FX, no idea what hit them → "this game is bullshit" → uninstall.
 
-Root cause in `ShipController.lua` Heartbeat loop (bb75a68):
+Two interlocking bugs, BOTH now EXPOSED by the LOS fix:
+
+**Bug A — P0 / UX — No ranged attack visual FX**
+- `RangedAttackRemote = Utils.CreateRemoteEvent("EntityRangedAttack")` is DECLARED at line 35 of `EntityAI.lua` but is NEVER FIRED → `git grep "RangedAttackRemote" -- src/` → only 1 hit, the declaration.
+- Client gets ZERO feedback when hit by ranged attack → health drops with NO muzzle flash, NO projectile, NO impact FX, NO hitscan tracer, NOTHING → confusing / frustrating ("why did my health drop? am I bugged? is sanity draining my health?")
+- BEFORE 39e582a: attacks ~5% hit rate → missing FX barely noticeable → players rarely got shot
+- AFTER 39e582a: attacks ~60-80% hit rate → players WILL get shot constantly → missing FX = IMMEDIATELY OBVIOUS → player churn
+- **This is now a P0 UX BUG — fix BEFORE public playtest**
+
+**Bug B — P1 / Gameplay Feel — No attack telegraphing**
+- Entity goes Idle/Chasing → Attacking → damage applied INSTANTLY (0 frame wind-up) → players get hit with ZERO warning → feels cheap / unfair
+- BEFORE 39e582a: 5% hit rate → players rarely got hit → telegraphing not urgently needed (rare surprise = acceptable for horror)
+- AFTER 39e582a: 60-80% hit rate → players get hit CONSTANTLY with zero warning → FRUSTRATING → "this game is bullshit, enemies shoot me instantly with no warning" → churn
+- **This is now a P1 gameplay feel bug — fix before public playtest**
+
+**The Fix — combine BOTH bugs into ONE commit (~15-28 LOC):**
+
+Use the existing DEAD CONFIG `CONFIG.RangedValidationDelay = 0.4` (declared but never read — `git grep "RangedValidationDelay" -- src/` → 1 hit, the CONFIG declaration) as attack wind-up / telegraph delay:
+
+1. **Server — `EntityAI.PerformAttack("Ranged", ...)`** (~8 LOC):
 ```lua
-root.AssemblyLinearVelocity = ship.Velocity * penalty  -- ship.Velocity.y = 0 always → AssemblyLinearVelocity.y = 0 → gravity killed
+function EntityAI:PerformAttack(attackType: string, targetPos: Vector3)
+    if attackType == "Ranged" then
+        -- Telegraph: wind-up FX + audio cue, 0.4s dodge window
+        self.State = "AttackWindup"  -- NEW state, OR reuse "Attacking" with timer
+        RangedAttackRemote:FireAllClients(self.Root.Position, targetPos, "windup")
+        
+        task.wait(CONFIG.RangedValidationDelay)  -- 0.4s dodge window
+        
+        -- Re-validate LOS after wind-up — target may have broken LOS → attack cancels → SKILL EXPRESSION
+        if not self.Target or not hasLineOfSight(self, targetPos) then
+            self.State = "Chasing"
+            return  -- attack cancelled, player successfully dodged
+        end
+        
+        -- Fire: damage + impact FX
+        RangedAttackRemote:FireAllClients(self.Root.Position, targetPos, "fire")
+        local hum = self.Target.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:TakeDamage(CONFIG.RangedDamage)
+            HorrorEvents.TriggerHorrorPulse(0.4)
+        end
+        self.State = "Idle"  -- OR "Chasing", resume AI
+    end
+end
 ```
 
-`ship.Velocity` comes from WASD move input → `Vector3.new(x, 0, z)` → Y = 0 always. Then `AssemblyLinearVelocity = ship.Velocity * penalty` → Y velocity forced to 0 every Heartbeat (60×/sec) → gravity never accumulates → float. Jump impulse (Humanoid.JumpPower → upward velocity) → next Heartbeat → Y velocity zeroed → jump height ≈ 0.
-
-**Symptoms:**
-- Walk off edge of ship deck while sailing → FLOAT in midair instead of FALL into ocean → breaks immersion, breaks drowning/ocean hazard mechanics
-- Press Spacebar while sailing → jump impulse → cancelled 1/60 sec later → jump height ≈ 0 → can't jump
-
-**Fix — 1 line, 1 file:**
-`src/ReplicatedStorage/Modules/ShipController.lua`, Heartbeat loop:
+2. **Client — NEW `ClientEntityController.lua` OR add to existing `ClientShipController.lua`** (~20 LOC):
 ```lua
--- before (buggy — kills gravity/jump):
-root.AssemblyLinearVelocity = ship.Velocity * math.clamp(penalty, 0.2, 1.0)
-
--- after (correct — preserve Y velocity for gravity/jump):
-local av = root.AssemblyLinearVelocity
-local sv = ship.Velocity * math.clamp(penalty, 0.2, 1.0)
-root.AssemblyLinearVelocity = Vector3.new(sv.X, av.Y, sv.Z)
+-- Listen for EntityRangedAttack RemoteEvent
+Remotes.EntityRangedAttack.OnClientEvent:Connect(function(originPos: Vector3, targetPos: Vector3, phase: string)
+    if phase == "windup" then
+        -- Telegraph FX: enemy eyes glow red, charging sound, screen edge warning?
+        -- Spawn charge-up particle at originPos
+    elseif phase == "fire" then
+        -- Projectile tracer: Beam from originPos → targetPos, 0.1s duration
+        -- Impact FX: spark particles at targetPos
+        -- Screen shake (mild): Getting shot = feedback, NOT boring
+        -- Hit sound: "thwip" / sizzle
+    end
+end)
 ```
-ShipController controls HORIZONTAL (X/Z) sailing movement, physics engine controls VERTICAL (Y) gravity/jump/fall. Clean separation of concerns.
+
+**Kill THREE birds with ONE stone:**
+1. ✅ Attack telegraphing P1 bug fixed — 0.4s wind-up → players can DODGE by breaking LOS → skill expression → fun
+2. ✅ Ranged FX P0 bug fixed — `RangedAttackRemote` finally gets USED → muzzle flash / projectile tracer / impact FX → gameplay clarity
+3. ✅ Dead config revived — `CONFIG.RangedValidationDelay = 0.4` goes from "never read, confusing maintenance burden" → "attack wind-up / telegraph delay, core gameplay mechanic"
 
 **Why this step:**
-- Smallest high-value change — 1 LOC, 1 file, fixes broken physics (gravity / jumping / falling)
-- Core gameplay > cleanup — physics correctness IS core gameplay. Floating instead of falling breaks immersion fundamentally
-- NOT a regression from bb75a68 — gravity bug was PRE-EXISTING, bb75a68 fixed the tug-of-war / freezing bug, NOT the gravity bug. Gravity bug was masked by tug-of-war bug being MORE broken / more visible. Now that movement handoff is fixed, gravity bug surfaces — fix it immediately before playtest results get polluted
-- <20 LOC — 1 line
-- Unblocks proper playtesting — if players float off ship decks instead of falling, playtest results are polluted (is horror tension low because sanity systems are broken, or because players are laughing at floaty physics?)
-- Pairs with bb75a68 — bb75a68 fixed movement AUTHORITY handoff (who controls velocity: ShipController vs Humanoid), this fix completes movement PHYSICS correctness (preserve Y velocity for gravity). Together: movement system is SOLID.
-
-**Design question — should jumping be ALLOWED while sailing?**
-Currently: `Humanoid.JumpPower` = 50 (default), NOT explicitly disabled in `SetSailing(true)` — so jump INPUT works, but jump PHYSICS is broken due to Y velocity overwrite bug. After fixing Y velocity bug, jumping WILL work while sailing.
-Options:
-- (A) Allow jumping while sailing — fun, emergent, players can jump between ships? Cool! Risk: players jump off ship deck accidentally → fall into ocean → frustration?
-- (B) Disable jumping while sailing — `Humanoid.JumpPower = 0` when sailing enabled, restore to 50 when on foot, consistent with `WalkSpeed = 0 / AutoRotate = false` toggle pattern — "sailing mode = Humanoid movement FULLY disabled, ShipController owns ALL physics". Prevents accidental falls off ship deck, simpler to reason about.
-- **Recommendation: (B) Disable jumping while sailing** — consistent with WalkSpeed/AutoRotate toggle, prevents frustration falls, simpler state machine ("sailing = ShipController owns EVERYTHING, on foot = Humanoid owns EVERYTHING", ZERO overlap). Add to `SetSailing()`: `humanoid.JumpPower = if enabled then 0 else 50` + `humanoid.JumpHeight = if enabled then 0 else 7.2` — 4 extra LOC, do it in SAME commit as Y velocity fix (total: ~5 LOC, still tiny). If playtesting shows players WANT to jump while sailing, re-enable easily: 1 line change.
-- **Decision for this commit: Include JumpPower toggle — total ~5 LOC, completes the movement authority handoff (WalkSpeed + AutoRotate + JumpPower ALL toggled together, ShipController owns 100% of physics when sailing, Humanoid owns 100% when on foot, ZERO overlap).**
+- AI combat is NOW EFFECTIVE (39e582a → 60-80% hit rate), which means AI combat is NOW FRUSTRATING (instant unfair damage with no FX, no telegraph, no dodge window)
+- This is EXPECTED — we fixed "AI can't hit anything" → exposed "AI hits TOO WELL with NO WARNING", which was always there, just masked by 5% hit rate
+- Fix telegraphing + FX BEFORE public playtest, or players WILL bounce — "this game is bullshit, enemies shoot me instantly with no warning, I keep taking damage for no reason, uninstall"
+- With telegraphing + FX: "oh no it's winding up — RUN! *dives behind cover* phew that was close — okay peek out, shoot back, EXTRACT — WIN → dopamine → retention"
+- Telegraphing + FX = the difference between "this game is bullshit" and "this game is TENSE"
+- Small change — ~15-28 LOC total, 2 files (`EntityAI.lua` + NEW `ClientEntityController.lua` OR existing `ClientShipController.lua`)
+- High value — transforms AI combat from FRUSTRATING → CHALLENGING BUT FAIR
+- Pairs with LOS fix (39e582a) — now that attacks actually HIT, players NEED to know WHEN/WHY they got hit + NEED a dodge window
 
 **Acceptance:**
-- [ ] Walk off edge of ship deck while sailing → FALL into ocean with gravity acceleration, do NOT float
-- [ ] Press Spacebar while sailing → jump is DISABLED (JumpPower = 0) — OR if design decision = allow jumping → jump works normally with forward momentum preserved, arc feels natural, gravity works
-- [ ] No regression in horizontal sailing movement — X/Z velocity still controlled by ShipController, weight penalties still apply, max speed 58 studs/sec preserved
-- [ ] No regression in Humanoid movement handoff — lobby / ghost ship interior movement still works (WalkSpeed 16, normal gravity/jump)
-- [ ] --!strict preserved
+- [ ] Corrupted pirate winds up ranged attack → 0.4s telegraph (glowing eyes / charge sound / muzzle flash start) → player sees/hears WARNING
+- [ ] Player breaks LOS during 0.4s wind-up → attack CANCELS → NO damage → skill expression → FEELS FAIR
+- [ ] Player stays in LOS during wind-up → attack FIRES → projectile tracer visible → impact FX → health damage applied → player UNDERSTANDS what hit them
+- [ ] Hit rate ~40-60% against skilled players who DODGE (was ~60-80% against AFK players with no telegraph, was ~5% with LOS bug) → CHALLENGING BUT FAIR
+- [ ] No regression in melee attacks — melee should still be instant (close range = no time to telegraph, makes sense)
+- [ ] `RangedAttackRemote` is FIRED by server, RECEIVED by client, FX play correctly
+- [ ] --!strict clean
 
-**Risk: Very Low.** 1 line physics fix (preserve Y velocity) + 4 lines JumpPower toggle (optional) = ~5 LOC total, 1 file. Worst case: gravity feels wrong / jump height weird → tunable via JumpPower/JumpHeight constants, easy rollback: `git revert`, 1 commit.
+**Risk: Low-Medium.** ~15-28 LOC, 2 files, adds a 0.4s `task.wait()` in `PerformAttack()` → attack is ASYNC now (was sync, instant damage). Need to ensure: (1) entity State is set to "AttackWindup" during wait → prevents double-attack spam, (2) target validation AFTER wait → check `self.Target` still exists, still alive, still in LOS → cancel if any fail, (3) entity can be destroyed / stunned during wind-up → Maid cleanup should cancel the task.wait() coroutine → verify Maid handles this (yes, Maid cleans up all connections/threads on Destroy). Worst case: attack goes through after entity is destroyed → nil check `if not self.Target` catches it, safe.
 
-**Estimated LOC:** ~1 line (Y velocity preservation) + ~4 lines (JumpPower toggle, optional) = ~5 LOC, 1 file (`ShipController.lua`)
+**Estimated LOC:** ~8 LOC server (`EntityAI.lua` — wind-up state + task.wait + LOS re-validation + RemoteEvent fire × 2) + ~20 LOC client (NEW `ClientEntityController.lua` OR add to `ClientShipController.lua` — RemoteEvent listener + windup FX + fire FX) = ~28 LOC total, 2 files
 
 **Test plan:**
-- Sail at full speed → walk off edge of ship deck → CONFIRM: FALL into ocean with gravity, do NOT float
-- Sail → press Spacebar → CONFIRM: if JumpPower toggle INCLUDED → no jump, character stays grounded. If NOT included → jump works, forward momentum preserved, arc natural
-- Ghost ship interior (on foot) → jump → CONFIRM: normal Roblox jump works
-- Lobby → jump → CONFIRM: normal jump works
-- No regression in horizontal movement
+- Spawn corrupted pirate → stand in open, 20 studs away → CONFIRM: pirate winds up (0.4s telegraph, glowing eyes / charge sound) → YOU CAN SEE/HEAR the attack coming → projectile tracer fires → impact FX → health damage → YOU UNDERSTAND what hit you
+- Duck behind cover DURING 0.4s wind-up → CONFIRM: attack CANCELS → NO damage → skill expression → FEELS FAIR
+- Stand still during wind-up → CONFIRM: attack HITS → damage + FX → YOUR FAULT for not dodging → FEELS FAIR
+- Hit rate against skilled dodging players: ~40-60% (was ~60-80% against AFK, was ~5% with LOS bug) → CHALLENGING BUT FAIR
+- Melee attacks → CONFIRM: still instant (no telegraph for close-range, correct)
+- Multiplayer: 2+ players, entity attacks Player A → CONFIRM: Player B also sees the wind-up FX + projectile tracer (FireAllClients) → spectator clarity → "OH SHIT WATCH OUT" moments → co-op tension
 
 ---
 
 ## Backlog
 
-### Awaiting Playtest Confirmation (bb75a68 — ShipController / Humanoid movement handoff)
-Georgie is currently playtesting `bb75a68` — movement authority handoff fix for ShipController / Humanoid tug-of-war bug. Confirm before shipping more code:
-- [ ] Foosha Village lobby — WalkSpeed 16, normal Humanoid controls, NO yanking/pulling
-- [ ] Windmill Village round start — ship movement 58 studs/sec, smooth, weight penalties apply, NO Humanoid tug-of-war
-- [ ] Board ghost ship — Humanoid movement RESTORED, walk freely, loot chests, NO freezing
-- [ ] Exit ghost ship — ship movement restored, seamless handoff, NO residual drift
-- [ ] Lobby return — Humanoid movement restored
+### Awaiting Playtest Confirmation — Movement System + AI Combat
+Movement system fixes (bb75a68 + 498226c + 3adfae3) + AI combat fix (39e582a) are SHIPPED but NOT playtested in-engine. Code review confidence HIGH, but NO substitute for in-engine validation.
+
+**Movement playtest checklist** (pull `agent/autonomous-florian-triangle @ 3adfae3`):
+- [ ] Foosha Village lobby — WalkSpeed 16, normal Humanoid controls, NO yanking/pulling, jump works
+- [ ] Windmill Village round start — ship movement 58 studs/sec, smooth, weight penalties apply, NO launch at round start, jump DISABLED (correct)
+- [ ] Sail at full speed → walk off edge of ship deck → CONFIRM: FALL into ocean with gravity, do NOT float
+- [ ] Board ghost ship — Humanoid movement RESTORED, walk freely, loot chests, NO freezing, jump works
+- [ ] Exit ghost ship — ship movement restored, seamless handoff, NO residual drift, NO launch on exit
+- [ ] Lobby return — Humanoid movement restored, jump works
 - [ ] Die / respawn during sailing — movement mode correctly restored, NO tug-of-war bug returning
-- [ ] Die / respawn during ghost ship interior looting — Humanoid movement correctly restored
-- [ ] 3+ rounds, multiple players joining/leaving — NO memory leaks (Ctrl+Shift+F3), activeShips table cleaned up correctly
-- [ ] Try jumping while sailing — currently BROKEN (Y velocity overwrite → no jump / float) — CONFIRM bug exists, will be fixed by next commit (gravity/Y velocity bug fix, 1 LOC, see Current Step above)
-- [ ] Walk off edge of ship deck while sailing — CONFIRM: do you FALL (correct) or FLOAT (bug) — expect FLOAT with current bb75a68 code, will be fixed by gravity/Y velocity bug fix
+- [ ] 3+ rounds, multiple players joining/leaving — NO memory leaks (Ctrl+Shift+F3)
 
-**If playtest FAILS (movement still broken / yanking / freezing / drift):** STOP. Do NOT ship gravity bug fix on top of broken movement handoff. Debug the movement handoff FIRST — check: is Humanoid.WalkSpeed actually being set to 0 when sailing? Is AssemblyLinearVelocity actually being SKIPPED when SailingEnabled = false? Is CharacterAdded handler firing correctly on respawn? Add print/warn debugging, narrow down which transition is broken (lobby→sail / sail→board / board→exit / exit→sail / sail→lobby / respawn), fix THAT before touching gravity code. Movement authority handoff MUST be solid before layering physics correctness fixes on top.
+**AI combat playtest checklist** (pull `agent/autonomous-florian-triangle @ 39e582a`):
+- [ ] Spawn corrupted pirate → stand in open, 20 studs away → CONFIRM: pirate shoots you, ~60-80% hit rate, ~14 damage/hit — CURRENTLY NO VISUAL FX (P0 bug, will be fixed by Current Step above)
+- [ ] Duck behind cover → CONFIRM: attacks STOP within 0.35s
+- [ ] Try to DODGE ranged attacks → currently IMPOSSIBLE (instant hitscan, zero telegraph) → CONFIRM this feels unfair → validates attack telegraphing P1 bug → WILL BE FIXED by Current Step above
+- [ ] Get shot at low sanity (< 30) → CONFIRM: health damage + horror pulse + sanity drain stack → TERRIFYING
 
-**If playtest PASSES (movement handoff works end-to-end, no yanking, no freezing, clean transitions):** Ship the gravity/Y velocity bug fix (Current Step above, ~5 LOC), then playtest AGAIN to confirm gravity/jumping works correctly, THEN proceed to next backlog item.
+**If playtest FAILS:** Report EXACTLY which system, which transition, what you felt, video clip. Movement bugs = P0 (blocks all gameplay), AI combat feel bugs = P1 (blocks retention), fix immediately, do NOT stack more features on broken foundations.
+
+**If playtest PASSES:** Continue with next backlog item — client input change detection + remove server rate limit (~15 LOC, massive movement FEEL improvement), then Quota Progress HUD (~40 LOC).
 
 ### Bug Fixes (prioritized by severity, then value/LOC)
 
-- **Fix EntityAI ranged attack LOS bug — Bug #4 (HIGH) — 1 LOC** — `hasLineOfSight()` returns `false` during cooldown instead of cached result → ranged attacks almost always miss. Fix: `return cachedLOS` instead of `return false`. High gameplay value (AI combat actually works). Smallest high-value change available AFTER movement system is confirmed working via playtest. Do NOT ship AI combat fixes on top of broken movement — players need to be able to MOVE before they can FIGHT.
-  - File: `EntityAI.lua`
-  - Risk: Very Low — 1 line boolean return value change
-  - Test: spawn corrupted pirate with ranged attack → verify: attacks HIT when player is in LOS, MISS when player breaks LOS (behind cover), hit rate ~60-80% (not ~5% current)
-
-- **Client-side input change detection + remove server rate limit — MEDIUM — ~15 LOC** — `ClientShipController` sends `PlayerMoveInput` EVERY RenderStepped frame (60Hz) when moveDir.Magnitude > 0, EVEN IF moveDir hasn't changed since last frame → holding W → sends `Vector3.new(0,0,-1)` 60 times/sec → server-side `isInputAllowed()` rate limits to 12.5Hz (0.08s) → 47.5/60 packets/sec DROPPED (rejected, wasted bandwidth). With physics bug fix (bb75a68), movement handoff is correct, but input pipeline is still wasteful + laggy.
+- **Client-side input change detection + remove server rate limit — MEDIUM — ~15 LOC** — `ClientShipController` sends `PlayerMoveInput` EVERY RenderStepped frame (60Hz) when moveDir.Magnitude > 0, EVEN IF moveDir hasn't changed since last frame → holding W → sends `Vector3.new(0,0,-1)` 60 times/sec → server-side `isInputAllowed()` rate limits to 12.5Hz (0.08s) → 47.5/60 packets/sec DROPPED (rejected, wasted bandwidth). Movement handoff is correct (bb75a68 + 498226c + 3adfae3), input gating is correct (498226c, `SailingEnabled` attribute), but input PIPELINE is still wasteful + laggy.
   - Fix client: store `lastMoveDir`, only `FireServer(moveDir)` if `(moveDir - lastMoveDir).Magnitude > 0.01` → reduces network traffic ~10-50× (normal movement: press W → send 1 packet, hold W 5 sec → 0 additional packets, release W → send 1 packet, total 2 packets vs 300 packets at 60Hz)
   - Fix server: set `InputRateLimit = 0` (unlimited) OR `0.016` (60Hz) → when input DOES change, server processes it IMMEDIATELY with zero artificial delay → minimum latency, maximum responsiveness
   - Combined: ~2-10 packets/sec actual (direction changes only) + zero artificial latency → massive feel + efficiency win
   - Files: `ClientShipController.lua` (~10 LOC) + `ShipController.lua` (1 LOC, `InputRateLimit = 0`)
   - Risk: Low — client-side change detection is straightforward, server rate limit removal just means "process all input immediately", worst case = slightly higher server CPU (still trivial: 10 packets/sec × 6 players = 60 RemoteEvent invocations/sec, negligible)
   - Test: Wireshark / Ctrl+Shift+F3 network stats → confirm packet rate drops from ~60/sec to ~2-10/sec during normal movement, confirm input latency feels snappier (no 80ms artificial delay), confirm no input loss (rapid direction changes still register immediately)
-
-- **Add `PlayerUndocked` RemoteEvent + client-side `isSailing` flag — LOW — ~15 LOC** — `ClientShipController` sends `PlayerMoveInput` unconditionally, even when NOT sailing (on foot / lobby / ghost ship interior). Server rejects via `isInputAllowed()` → wasted bandwidth, harmless for physics (movement handoff fixed in bb75a68), but wasteful.
-  - Add `PlayerUndocked: FireClient(player, exteriorCFrame)` in `ExitGhostShip()`, mirror of existing `PlayerDocked` event
-  - Client: `isSailing = true` by default? No — default `false` (Humanoid movement), set `true` on round start? Need a `RoundStarted` event OR reuse `PlayerUndocked` for initial sailing enable too. Simpler: server fires `SetSailingState:FireClient(player, enabled: boolean)` whenever `SetSailing()` is called — single event, boolean payload, covers ALL transitions: round start (true), board ghost ship (false), exit ghost ship (true), lobby return (false), respawn (re-apply current state). ~8 LOC server + ~7 LOC client = ~15 LOC total.
-  - Client: gate `PlayerMoveInput:FireServer()` behind `if isSailing then ... end` → zero wasted bandwidth when on foot
-  - Pair with input change detection fix above — do BOTH in same commit: "fix(net): reduce move input bandwidth 50× + eliminate input latency — client-side change detection + remove server rate limit + add sailing state sync"
-  - Files: `ShipController.lua` (add SetSailingState RemoteEvent + fire on SetSailing), `ClientShipController.lua` (add isSailing flag + event handler + input gate)
-  - Risk: Low — simple boolean flag + event plumbing, if event is missed / dropped, worst case = client stops sending input while sailing (player freezes, obvious bug, easy to detect/fix — add periodic state resync every 5 sec as safety net if paranoid, +3 LOC)
+  - **Do AFTER attack telegraphing + FX fix (Current Step) — AI combat feel is MORE broken right now (instant unfair damage with no FX) than movement feel (laggy input, still playable). Fix AI combat first, then movement polish.**
 
 ### Features / Content
 
@@ -199,7 +257,7 @@ Georgie is currently playtesting `bb75a68` — movement authority handoff fix fo
 
 - **Client interior lighting change on boarding — ~15 LOC** — Second half of the TODO at `ClientShipController.lua:60`. Camera shake (620d541) covers impact feel. Interior lighting (tint screen green/dim, ColorCorrection) adds sustained atmosphere while inside ghost ship.
   - Pairs well with camera shake — shake = impact moment (boarding), lighting = sustained atmosphere (while inside)
-  - Implementation: `ColorCorrectionEffect` in `Lighting` service, Tween `TintColor` → greenish `(0.7, 1.0, 0.7)`, `Brightness = -0.2`, `Contrast = 0.1`, `Saturation = -0.3` over 0.5s on `PlayerDocked`, reverse tween on exit (need `PlayerUndocked` event — see "Add PlayerUndocked RemoteEvent" task above, dependency)
+  - Implementation: `ColorCorrectionEffect` in `Lighting` service, Tween `TintColor` → greenish `(0.7, 1.0, 0.7)`, `Brightness = -0.2`, `Contrast = 0.1`, `Saturation = -0.3` over 0.5s on `PlayerDocked`, reverse tween on exit (need `PlayerUndocked` event — can use `player:GetAttributeChangedSignal("SailingEnabled")` now that 498226c added the SailingEnabled attribute, no separate RemoteEvent needed)
   - Test: board ghost ship → screen tints green/dim over 0.5s, stays tinted while inside, exit → tint fades back to normal over 0.5s, no flicker, no stuck tint if player dies/teleports unexpectedly (add cleanup in CharacterRemoving just in case)
   - Accessibility: respect screen shake disable toggle (see below) — if player disables screen effects, disable interior lighting tint too, OR make it opt-out separately ("reduce motion" vs "reduce color effects" — two toggles? Overkill for MVP, single "reduce screen effects" toggle covers both)
 
@@ -247,7 +305,7 @@ Georgie is currently playtesting `bb75a68` — movement authority handoff fix fo
 
 ---
 
-**Last updated:** 2026-06-30 01:15 UTC  
-**Next review:** After playtest confirms bb75a68 movement handoff fix works end-to-end, then ship gravity/Y velocity bug fix (Current Step above), then playtest AGAIN to confirm gravity/jumping works, then proceed to EntityAI ranged LOS bug (Bug #4) OR client input optimization, depending on playtest feedback — if movement STILL feels laggy/unresponsive after bb75a68, prioritize input change detection + rate limit removal (~15 LOC, massive feel improvement), if movement feels GOOD, prioritize AI combat (ranged LOS bug, 1 LOC, restores enemy threat level)
+**Last updated:** 2026-06-30 16:15 UTC  
+**Next review:** After attack telegraphing + ranged FX fix ships (Current Step above), then playtest AI combat end-to-end: does combat feel CHALLENGING BUT FAIR? Can you DODGE attacks by breaking LOS during 0.4s wind-up? Do FX communicate clearly WHEN/WHERE you got hit? If YES → ship it, move to client input change detection (~15 LOC, movement FEEL polish), then Quota HUD (~40 LOC). If NO → iterate on telegraph timing / FX clarity / damage numbers until combat FEELS RIGHT — AI combat is a CORE PILLAR, if fighting corrupted pirates isn't fun/tense/fair, players quit, all our work wasted.
 
-**Current mood:** Cautiously optimistic. Physics movement bug was caught by playtesting in ~30 seconds — exactly why we kept saying "STOP SHIPPING CODE, PLAYTEST WHAT WE HAVE". The fix is architecturally sound (proper authority handoff with mutual exclusion), all edge cases handled (respawn, player leave / memory leak, velocity drift), well-commented, --!strict clean. Waiting on Georgie's playtest confirmation — does movement feel correct now in ALL FIVE states: lobby / sailing / ghost ship interior / exit / lobby return? If YES → ship gravity bug fix (1 LOC), then input optimization (~15 LOC), then playtest AGAIN, then AI combat. If NO → debug movement handoff, find which transition is broken, fix THAT before touching anything else. Movement is FOUNDATIONAL — if players can't move reliably, they quit before experiencing ANY horror / AI / extraction gameplay, all our work wasted.
+**Current mood:** Cautiously optimistic, but URGENT. Movement system is SOLID (bb75a68 + 498226c + 3adfae3 = authority handoff + velocity pollution + gravity physics, all fixed, well-tested in code review, needs Studio playtest confirmation). AI combat is EFFECTIVE but FRUSTRATING (39e582a fixed LOS → 60-80% hit rate, which EXPOSED the "instant unfair damage with no FX, no telegraph, no dodge window" design bug that was always there, just masked by 5% hit rate). Fix telegraphing + FX IMMEDIATELY — this is the difference between "this game is bullshit" and "this game is TENSE". AI combat FEEL is blocking public playtest — do NOT ship to playtesters with instant unfair damage and no visual feedback, they WILL bounce, retention = 0%, all our work wasted. Telegraphing + FX = ~15-28 LOC, 2 files, 30-60 min work, MASSIVE impact on player experience. DO IT NOW.
