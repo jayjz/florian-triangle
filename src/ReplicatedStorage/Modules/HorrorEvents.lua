@@ -64,7 +64,10 @@ function HorrorEvents:Update(dt: number)
 		end
 
 		local decay = CONFIG.BaseDecay * multiplier
-		local newSanity = Utils.Clamp(level - (decay * dt), 0, 100)
+		-- Bug #3 fix: Update() throttles to 4Hz (CONFIG.UpdateRate = 0.25s),
+		-- but was using Heartbeat dt (~0.016s) instead of actual elapsed time.
+		-- Result: sanity drained ~15× too slowly. Use UpdateRate, not dt.
+		local newSanity = Utils.Clamp(level - (decay * CONFIG.UpdateRate), 0, 100)
 		playerSanity[player] = newSanity
 
 		if math.floor(level) ~= math.floor(newSanity) then
