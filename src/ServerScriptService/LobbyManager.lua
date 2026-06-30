@@ -146,7 +146,13 @@ end
 function LobbyManager.ReturnToLobby()
 	isInLobby = true
 	readyPlayers = {}
+
+	-- Disable sailing mode for all returning players — restore Humanoid
+	-- movement for Foosha Village lobby (on-foot socializing).
+	-- Prevents ShipController / Humanoid tug-of-war in lobby.
+	local ShipController = require(game.ReplicatedStorage.Modules.ShipController)
 	for _, player in Players:GetPlayers() do
+		ShipController.SetSailing(player, false)
 		LobbyManager.TeleportToLobby(player)
 	end
 	print("[LobbyManager] Players returned to lobby")

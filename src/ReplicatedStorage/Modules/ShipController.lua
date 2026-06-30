@@ -44,7 +44,7 @@ local function getOrCreateShip(player: Player): ShipState
 			Velocity = Vector3.new(),
 			Weight = 0,
 			LastInputTime = 0,
-			SailingEnabled = true,
+			SailingEnabled = false, -- Default to Humanoid movement (lobby/on-foot). Opt-in to ShipController sailing.
 			LastBoardTime = 0,
 		}
 		activeShips[player] = ship
@@ -62,12 +62,16 @@ end
 function ShipController.Initialize()
 	maid:GiveTask(RunService.Heartbeat:Connect(function(dt: number)
 		for player, ship in activeShips do
+			-- Only control AssemblyLinearVelocity when actively sailing.
+			-- When SailingEnabled == false, let Roblox Humanoid handle movement
+			-- (lobby, ghost ship interiors). This prevents tug-of-war between
+			-- Humanoid controller (WalkSpeed 16) and ShipController (58 studs/sec).
+			if not ship.SailingEnabled then continue end
 			if not player.Character then continue end
 			local root = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if root then
-				local velocity = if ship.SailingEnabled == false then Vector3.new() else ship.Velocity
 				local penalty = 1 - (ship.Weight / 80) * CONFIG.BaseWeightPenalty
-				root.AssemblyLinearVelocity = velocity * math.clamp(penalty, 0.2, 1.0)
+				root.AssemblyLinearVelocity = ship.Velocity * math.clamp(penalty, 0.2, 1.0)
 			end
 		end
 	end))
@@ -87,6 +91,40 @@ function ShipController.Initialize()
 		ship.LastInputTime = os.clock()
 	end)
 
+	-- Re-apply Humanoid movement settings on character respawn.
+	-- When a player respawns, their new Humanoid defaults to WalkSpeed 16 /
+	-- AutoRotate true. If SailingEnabled was true before death, re-disable
+	-- Humanoid movement on the new character, otherwise Humanoid +
+	-- ShipController fight → tug-of-war / yanking bug.
+	local Players = Utils.GetService("Players")
+	maid:GiveTask(Players.PlayerAdded:Connect(function(player: Player)
+		-- CharacterAdded is NOT stored in maid — it dies naturally with the
+		-- Player instance when they leave. We DO clean up activeShips[player]
+		-- in the global PlayerRemoving handler below to break the retain cycle:
+		-- activeShips[player] → strong ref to Player → would leak after leave.
+		player.CharacterAdded:Connect(function(character: Model)
+			task.wait() -- Wait one frame for Humanoid to exist
+			local ship = activeShips[player]
+			if ship and ship.SailingEnabled then
+				local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+				if humanoid then
+					humanoid.WalkSpeed = 0
+					humanoid.AutoRotate = false
+				end
+			end
+			-- else: SailingEnabled = false or no ship state → leave Humanoid
+			-- at defaults (WalkSpeed 16, AutoRotate true) for on-foot movement
+		end)
+	end))
+
+	-- Clean up ShipState when players leave — prevents Player instance leak
+	-- via activeShips table key. Without this: activeShips[player] keeps
+	-- Player alive after leave → CharacterAdded closure keeps Player alive →
+	-- memory leak accumulates over multiple sessions on persistent servers.
+	maid:GiveTask(Players.PlayerRemoving:Connect(function(player: Player)
+		activeShips[player] = nil
+	end))
+
 	print("[ShipController] Initialized - Secure sailing active")
 end
 
@@ -98,14 +136,42 @@ function ShipController.UpdatePlayerWeight(player: Player, newWeight: number)
 end
 
 -- SetSailing: Toggle player ship movement on/off.
--- enabled = false → freeze velocity, reject move input (player is inside ghost ship interior)
--- enabled = true  → restore sailing (player exited back to open sea)
+-- enabled = false → freeze velocity, reject move input, RESTORE Humanoid movement
+--                  (player is on foot: lobby, ghost ship interior)
+-- enabled = true  → restore sailing, DISABLE Humanoid movement
+--                  (player is sailing: ShipController owns AssemblyLinearVelocity)
 -- Note: Prefer BoardGhostShip/ExitGhostShip for full boarding flow with FX.
 -- SetSailing is kept exported as a low-level primitive.
 function ShipController.SetSailing(player: Player, enabled: boolean)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then return end
 	local ship = getOrCreateShip(player)
 	ship.SailingEnabled = enabled
+
+	-- Toggle Humanoid movement controller to prevent tug-of-war with
+	-- AssemblyLinearVelocity. When sailing: Humanoid OFF, ShipController ON.
+	-- When on foot: Humanoid ON, ShipController OFF.
+	local character = player.Character
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+		if humanoid then
+			if enabled then
+				-- Sailing mode: disable Humanoid movement, ShipController owns physics
+				humanoid.WalkSpeed = 0
+				humanoid.AutoRotate = false
+			else
+				-- On-foot mode: restore Humanoid movement, ShipController hands off
+				-- Reset AssemblyLinearVelocity so Humanoid starts from clean state
+				local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+				if root then
+					root.AssemblyLinearVelocity = Vector3.zero
+					root.AssemblyAngularVelocity = Vector3.zero
+				end
+				humanoid.WalkSpeed = 16
+				humanoid.AutoRotate = true
+			end
+		end
+	end
+
 	if not enabled then
 		ship.Velocity = Vector3.new()
 	end

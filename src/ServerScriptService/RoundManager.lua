@@ -70,6 +70,18 @@ function RoundManager.StartRound()
 	
 	-- Spawn ghost ships for scavenging
 	spawnGhostShips()
+
+	-- Enable ship sailing mode for all players.
+	-- ShipController defaults to SailingEnabled = false (Humanoid movement,
+	-- for lobby / ghost ship interiors). At round start (Windmill Village),
+	-- players board their crew ship and begin sailing — activate
+	-- ShipController physics, disable Humanoid movement to prevent
+	-- tug-of-war between Humanoid.WalkSpeed (16) and AssemblyLinearVelocity (58).
+	local ShipController = require(game.ReplicatedStorage.Modules.ShipController)
+	local Players = game:GetService("Players")
+	for _, player in Players:GetPlayers() do
+		ShipController.SetSailing(player, true)
+	end
 	
 	print(`[RoundManager] New round started. Quota: {EXTRACTION_QUOTA}`)
 end
