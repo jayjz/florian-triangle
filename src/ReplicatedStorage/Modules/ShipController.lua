@@ -154,6 +154,7 @@ function ShipController.Initialize()
 	-- AutoRotate true. If SailingEnabled was true before death, re-disable
 	-- Humanoid movement on the new character, otherwise Humanoid +
 	-- ShipController fight → tug-of-war / yanking bug.
+	-- Also restore NetworkOwnership + HumanoidState (anti-yanking fix).
 	local Players = Utils.GetService("Players")
 	maid:GiveTask(Players.PlayerAdded:Connect(function(player: Player)
 		-- CharacterAdded is NOT stored in maid — it dies naturally with the
@@ -163,15 +164,30 @@ function ShipController.Initialize()
 		player.CharacterAdded:Connect(function(character: Model)
 			task.wait() -- Wait one frame for Humanoid to exist
 			local ship = activeShips[player]
+			local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+			local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if not humanoid or not root then return end
+
 			if ship and ship.SailingEnabled then
-				local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
-				if humanoid then
-					humanoid.WalkSpeed = 0
-					humanoid.AutoRotate = false
-				end
+				-- Sailing mode respawn: disable Humanoid, server owns physics.
+				humanoid.WalkSpeed = 0
+				humanoid.AutoRotate = false
+				humanoid.UseJumpPower = true
+				humanoid.JumpPower = 0
+				humanoid.JumpHeight = 0
+				pcall(function() root:SetNetworkOwner(nil) end)
+				pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end)
+			else
+				-- On-foot respawn: ensure client owns physics for responsive Humanoid.
+				-- Character defaults to client-owned, but be explicit for consistency
+				-- (handles edge case: player dies while sailing → respawns in lobby,
+				-- ShipState may still exist with SailingEnabled=true briefly).
+				pcall(function() root:SetNetworkOwner(player) end)
+				pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
 			end
 			-- else: SailingEnabled = false or no ship state → leave Humanoid
-			-- at defaults (WalkSpeed 16, AutoRotate true) for on-foot movement
+			-- at defaults (WalkSpeed 16, AutoRotate true) for on-foot movement.
+			-- NetworkOwnership + State explicitly restored above.
 		end)
 	end))
 
@@ -235,6 +251,7 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 	-- When on foot: Humanoid ON, ShipController OFF.
 	local character = player.Character
 	if character then
+		local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
 		if humanoid then
 			if enabled then
@@ -252,20 +269,63 @@ function ShipController.SetSailing(player: Player, enabled: boolean)
 				humanoid.UseJumpPower = true
 				humanoid.JumpPower = 0
 				humanoid.JumpHeight = 0
+
+				-- NETWORK OWNERSHIP FIX (yanking/rubberbanding bug):
+				-- Player characters are network-owned by the client by default in Roblox.
+				-- When ShipController (server) writes AssemblyLinearVelocity every Heartbeat,
+				-- the client ALSO simulates physics for that same part and overwrites ALV —
+				-- classic tug-of-war → yanking/rubberbanding.
+				-- Fix: Give server authority over character physics during sailing.
+				-- SetNetworkOwner(nil) → server owns physics, authoritative movement.
+				if root then
+					local ok = pcall(function()
+						root:SetNetworkOwner(nil)
+					end)
+					if not ok then
+						warn("[ShipController] SetNetworkOwner(nil) failed for", player.Name)
+					end
+				end
+
+				-- Kick Humanoid state machine into pure physics mode — belt-and-suspenders
+				-- against state machine interference with ShipController ALV writes.
+				-- Physics state = Humanoid stops all locomotion/standing logic, zero interference.
+				local ok = pcall(function()
+					humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+				end)
+				if not ok then
+					warn("[ShipController] Humanoid:ChangeState(Physics) failed for", player.Name)
+				end
 			else
 				-- On-foot mode: restore Humanoid movement, ShipController hands off.
 				-- Reset AssemblyLinearVelocity so Humanoid starts from clean state
 				-- (no residual drift/slide from sailing velocity).
-				local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 				if root then
 					root.AssemblyLinearVelocity = Vector3.zero
 					root.AssemblyAngularVelocity = Vector3.zero
+
+					-- Restore client network ownership for normal Humanoid movement.
+					-- Player characters default to client-owned for input responsiveness.
+					-- Give ownership back when sailing ends (lobby, ghost ship interior).
+					local ok = pcall(function()
+						root:SetNetworkOwner(player)
+					end)
+					if not ok then
+						warn("[ShipController] SetNetworkOwner(player) failed for", player.Name)
+					end
 				end
 				humanoid.WalkSpeed = 16
 				humanoid.AutoRotate = true
 				humanoid.UseJumpPower = true
 				humanoid.JumpPower = 50
 				humanoid.JumpHeight = 7.2
+
+				-- Restore Humanoid to normal running state for on-foot movement.
+				local ok = pcall(function()
+					humanoid:ChangeState(Enum.HumanoidStateType.Running)
+				end)
+				if not ok then
+					warn("[ShipController] Humanoid:ChangeState(Running) failed for", player.Name)
+				end
 			end
 		end
 	end
